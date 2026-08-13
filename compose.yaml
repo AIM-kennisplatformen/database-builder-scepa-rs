@@ -1,15 +1,16 @@
 services:
   app:
+    profiles: [server]
     build:
       context: .
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      TYPEDB_ADDRESS: typedb:1729
+      TYPEDB_ADDRESS: ${TYPEDB_ADDRESS}
       TYPEDB_DATABASE: ${TYPEDB_DATABASE}
       TYPEDB_USERNAME: ${TYPEDB_USERNAME}
       TYPEDB_PASSWORD: ${TYPEDB_PASSWORD}
       GROBID_URL: http://grobid:8070
-      GARAGE_ENDPOINT: http://garage:3900
+      GARAGE_ENDPOINT: ${GARAGE_ENDPOINT}
       GARAGE_REGION: garage
       GARAGE_BUCKET: ${GARAGE_BUCKET}
       GARAGE_ACCESS_KEY: ${GARAGE_ACCESS_KEY}
@@ -26,17 +27,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      typedb:
-        condition: service_healthy
       grobid:
-        condition: service_healthy
-      garage:
         condition: service_healthy
       restate:
         condition: service_healthy
     restart: unless-stopped
 
   typedb:
+    profiles: [storage]
     image: typedb/typedb:3.12.2
     ports:
       - "${TYPEDB_GRPC_PORT}:1729"
@@ -52,6 +50,7 @@ services:
     restart: unless-stopped
 
   postgres:
+    profiles: [server]
     image: postgres:18-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -70,6 +69,7 @@ services:
     restart: unless-stopped
 
   garage:
+    profiles: [storage]
     image: dxflrs/garage:v2.3.0
     command: ["/garage", "server", "--single-node", "--default-bucket"]
     environment:
@@ -92,6 +92,7 @@ services:
     restart: unless-stopped
 
   grobid:
+    profiles: [server]
     image: grobid/grobid:0.9.0-crf
     init: true
     ulimits:
@@ -109,6 +110,7 @@ services:
     restart: unless-stopped
 
   restate:
+    profiles: [server]
     image: docker.restate.dev/restatedev/restate:1.7.2
     command: ["--node-name=restate-1"]
     ports:
@@ -126,6 +128,7 @@ services:
     restart: unless-stopped
 
   restate-register:
+    profiles: [server]
     image: curlimages/curl:8.16.0
     entrypoint: ["/bin/sh", "-c"]
     command:
