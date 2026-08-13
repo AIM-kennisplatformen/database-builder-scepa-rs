@@ -1,3 +1,5 @@
 /target
 /.artifacts/
 /.sources/
+.env
+!.env.example

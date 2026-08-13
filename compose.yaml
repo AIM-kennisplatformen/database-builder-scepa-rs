@@ -3,26 +3,26 @@ services:
     build:
       context: .
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-scepa}:${POSTGRES_PASSWORD:-scepa}@postgres:5432/${POSTGRES_DB:-scepa}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       TYPEDB_ADDRESS: typedb:1729
-      TYPEDB_DATABASE: ${TYPEDB_DATABASE:-scepa}
-      TYPEDB_USERNAME: ${TYPEDB_USERNAME:-admin}
-      TYPEDB_PASSWORD: ${TYPEDB_PASSWORD:-password}
+      TYPEDB_DATABASE: ${TYPEDB_DATABASE}
+      TYPEDB_USERNAME: ${TYPEDB_USERNAME}
+      TYPEDB_PASSWORD: ${TYPEDB_PASSWORD}
       GROBID_URL: http://grobid:8070
       GARAGE_ENDPOINT: http://garage:3900
       GARAGE_REGION: garage
-      GARAGE_BUCKET: ${GARAGE_BUCKET:-scepa-pdfs}
-      GARAGE_ACCESS_KEY: ${GARAGE_ACCESS_KEY:-GK00000000000000000000000000000000}
-      GARAGE_SECRET_KEY: ${GARAGE_SECRET_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      GARAGE_BUCKET: ${GARAGE_BUCKET}
+      GARAGE_ACCESS_KEY: ${GARAGE_ACCESS_KEY}
+      GARAGE_SECRET_KEY: ${GARAGE_SECRET_KEY}
       RESTATE_INGRESS_URL: http://restate:8080
       RESTATE_ADMIN_URL: http://restate:9070
       DEBUG_ARTIFACT_ROOT: /app/.artifacts
-      RUST_LOG: ${RUST_LOG:-scepa=debug,restate_sdk=info}
+      RUST_LOG: ${RUST_LOG}
     volumes:
       - ./.artifacts:/app/.artifacts
     ports:
-      - "${API_PORT:-3000}:3000"
-      - "${RESTATE_SERVICE_PORT:-9080}:9080"
+      - "${API_PORT}:3000"
+      - "${RESTATE_SERVICE_PORT}:9080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -39,8 +39,8 @@ services:
   typedb:
     image: typedb/typedb:3.12.2
     ports:
-      - "${TYPEDB_GRPC_PORT:-1729}:1729"
-      - "${TYPEDB_HTTP_PORT:-8000}:8000"
+      - "${TYPEDB_GRPC_PORT}:1729"
+      - "${TYPEDB_HTTP_PORT}:8000"
     volumes:
       - typedb_data:/var/lib/typedb/data
     healthcheck:
@@ -54,11 +54,11 @@ services:
   postgres:
     image: postgres:18-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-scepa}
-      POSTGRES_USER: ${POSTGRES_USER:-scepa}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scepa}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
       - ./crates/scepa/migrations:/docker-entrypoint-initdb.d:ro
@@ -73,12 +73,12 @@ services:
     image: dxflrs/garage:v2.3.0
     command: ["/garage", "server", "--single-node", "--default-bucket"]
     environment:
-      GARAGE_DEFAULT_ACCESS_KEY: ${GARAGE_ACCESS_KEY:-GK00000000000000000000000000000000}
-      GARAGE_DEFAULT_SECRET_KEY: ${GARAGE_SECRET_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
-      GARAGE_DEFAULT_BUCKET: ${GARAGE_BUCKET:-scepa-pdfs}
+      GARAGE_DEFAULT_ACCESS_KEY: ${GARAGE_ACCESS_KEY}
+      GARAGE_DEFAULT_SECRET_KEY: ${GARAGE_SECRET_KEY}
+      GARAGE_DEFAULT_BUCKET: ${GARAGE_BUCKET}
     ports:
-      - "${GARAGE_S3_PORT:-3900}:3900"
-      - "${GARAGE_ADMIN_PORT:-3903}:3903"
+      - "${GARAGE_S3_PORT}:3900"
+      - "${GARAGE_ADMIN_PORT}:3903"
     volumes:
       - ./garage.toml:/etc/garage.toml:ro
       - garage_meta:/var/lib/garage/meta
@@ -99,7 +99,7 @@ services:
         soft: 0
         hard: 0
     ports:
-      - "${GROBID_PORT:-8070}:8070"
+      - "${GROBID_PORT}:8070"
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent http://localhost:8070/api/isalive | grep --quiet true"]
       interval: 10s
@@ -112,9 +112,9 @@ services:
     image: docker.restate.dev/restatedev/restate:1.7.2
     command: ["--node-name=restate-1"]
     ports:
-      - "${RESTATE_INGRESS_PORT:-8080}:8080"
-      - "${RESTATE_ADMIN_PORT:-9070}:9070"
-      - "${RESTATE_FABRIC_PORT:-5122}:5122"
+      - "${RESTATE_INGRESS_PORT}:8080"
+      - "${RESTATE_ADMIN_PORT}:9070"
+      - "${RESTATE_FABRIC_PORT}:5122"
     volumes:
       - restate_data:/restate-data
     healthcheck:
