@@ -4,10 +4,31 @@ SCEPA runs PDF extraction and TEI conversion as a durable Restate workflow.
 Garage stores immutable source PDFs by SHA-256, PostgreSQL indexes those
 objects and stores review cases, and Axum exposes the public and operator APIs.
 
-The `crates/scepa` package contains the reusable pipeline, Restate workflow, and
-PostgreSQL store. The `crates/api` package is a separate binary crate containing
-the Axum routes and server startup. The `crates/cli` package contains the Clap
-command-line interface. The repository root is a Cargo workspace.
+## Repository layout
+
+```text
+backend/                 Rust workspace
+  crates/api/            Axum API and Restate server
+  crates/cli/            Clap command-line client
+  crates/core/           Shared pipeline, models, and persistence
+frontend/                Reserved frontend workspace
+compose.yaml             Local application and infrastructure stack
+```
+
+The backend is self-contained: its Cargo manifest, lockfile, Dockerfile, and
+all Rust crates live under `backend/`. This keeps its dependency and build
+configuration independent from the frontend toolchain that will be added under
+`frontend/`.
+
+Run backend development commands from its workspace:
+
+```bash
+cd backend
+cargo check --workspace
+cargo test --workspace
+cargo run --package scepa-api
+cargo run --package scepa-cli -- --help
+```
 
 ## Start the local stack
 
@@ -110,9 +131,9 @@ The health endpoint is `GET /healthz`.
 
 ## Pipeline CLI
 
-The API binary also exposes pipeline commands. With the Compose services
-running, use the same `DATABASE_URL`, `GROBID_URL`, and `RESTATE_INGRESS_URL`
-environment variables as the server.
+The CLI exposes pipeline commands. With the Compose services running, use the
+same `DATABASE_URL`, `GROBID_URL`, and `RESTATE_INGRESS_URL` environment
+variables as the server.
 
 Run the composite Grobid extraction and TEI parser against an existing review
 artifact:

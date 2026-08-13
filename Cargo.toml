@@ -1,3 +1,0 @@
-[workspace]
-members = ["crates/api", "crates/cli", "crates/scepa"]
-resolver = "3"
