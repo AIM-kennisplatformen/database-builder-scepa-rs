@@ -1,0 +1,96 @@
+define
+attribute id @abstract, value string;
+
+attribute document_id sub id;
+attribute person_id sub id;
+attribute organization_id sub id;
+attribute venue_id sub id;
+
+attribute doi sub id;
+attribute isbn sub id;
+attribute issn sub id;
+attribute ror_id sub id;
+
+attribute title, value string;
+attribute pdf_hash, value string;
+
+attribute publication_date, value datetime;
+attribute publication_note, value string;
+attribute version_number, value string;
+
+attribute name @abstract, value string;
+attribute given_name sub name;
+attribute family_name sub name;
+attribute organization_name sub name;
+attribute venue_name sub name;
+
+entity document,
+    owns document_id @key,
+    owns pdf_hash @unique,
+    owns title @card(1),
+    plays contribution:work @card(1..),
+    plays publication_event:work,
+    plays affiliation:evidence;
+
+entity research_paper sub document,
+    owns doi @unique;
+
+entity report sub document;
+
+entity book sub document,
+    owns isbn @unique @card(0..);
+
+entity person,
+    owns person_id @key,
+    owns given_name,
+    owns family_name,
+    plays contribution:contributor @card(1..),
+    plays affiliation:person;
+
+entity organization,
+    owns organization_id @key,
+    owns organization_name @card(1),
+    owns ror_id @unique,
+    plays contribution:contributor @card(1..),
+    plays affiliation:organization,
+    plays publication_event:publisher;
+
+entity institution sub organization;
+entity government_institution sub institution;
+entity educational_institution sub institution;
+entity nonprofit_institution sub institution;
+
+entity publisher sub organization;
+
+entity publication_venue @abstract,
+    owns venue_id @key,
+    owns issn @unique,
+    owns venue_name @card(1),
+    plays publication_event:venue;
+
+entity journal sub publication_venue;
+entity conference sub publication_venue;
+
+relation contribution,
+    relates contributor @card(1),
+    relates work @card(1);
+
+relation authorship sub contribution;
+relation peer_review sub contribution;
+
+relation publication_event @abstract,
+    relates publisher,
+    relates venue,
+    relates work @card(1),
+    owns publication_date @card(1),
+    owns publication_note @card(0..);
+
+relation submission sub publication_event;
+relation acceptance sub publication_event;
+relation publication sub publication_event,
+    owns version_number;
+
+relation affiliation,
+    relates person @card(1),
+    relates organization @card(1),
+    relates evidence @card(1..);
