@@ -1,0 +1,11 @@
+[package]
+name = "scepa-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5.46", features = ["derive"] }
+reqwest = { version = "0.13.4", features = ["json"] }
+scepa = { path = "../scepa" }
+serde_json = "1.0.142"
+tokio = { version = "1.53.1", features = ["fs", "macros", "rt-multi-thread"] }
