@@ -1,8 +1,8 @@
 use std::{env, error::Error, path::PathBuf, time::Duration};
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use scepa::{
-    operations::{PipelinePart, run_artifact_operation, submit_pipeline},
+    operations::submit_pipeline,
     pipeline::{
         PipelineService,
         garage::{GarageClient, GaragePipelineService, PostgresPdfStore},
@@ -11,7 +11,11 @@ use scepa::{
 };
 
 #[derive(Debug, Parser)]
-#[command(name = "scepa-cli", about = "SCEPA pipeline command-line interface")]
+#[command(
+    name = "scepa-cli",
+    about = "SCEPA pipeline command-line interface",
+    disable_help_subcommand = true
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -19,58 +23,23 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Runs or inspects the document pipeline.
-    Pipeline(PipelineArgs),
-    /// Manages persisted review artifacts.
-    Artifact(ArtifactArgs),
-}
-
-#[derive(Debug, Args)]
-struct PipelineArgs {
-    #[command(subcommand)]
-    command: PipelineCommand,
-}
-
-#[derive(Debug, Subcommand)]
-enum PipelineCommand {
-    /// Runs a part of the composite Grobid + TEI service on a stored artifact.
-    Grobid {
-        /// Pipeline part: input-validation, output-validation, or execute.
-        part: PipelinePart,
-        /// Existing review artifact ID.
-        identifier: i64,
-    },
-    /// Submits one PDF, or every PDF in a directory with `run batch <dir>`.
-    Run {
+    /// Submits a single PDF to the document pipeline.
+    Single {
         /// Overrides the PDF file stem used as the Restate workflow identifier.
         #[arg(long)]
         identifier: Option<String>,
-        #[arg(required = true, num_args = 1..=2)]
-        target: Vec<PathBuf>,
+        /// PDF to submit.
+        pdf: PathBuf,
     },
-}
-
-#[derive(Debug, Args)]
-struct ArtifactArgs {
-    #[command(subcommand)]
-    command: ArtifactCommand,
-}
-
-#[derive(Debug, Subcommand)]
-enum ArtifactCommand {
-    /// Replaces the artifact of a pending validation failure.
-    Patch {
-        identifier: i64,
-        replacement: PathBuf,
-        #[arg(long)]
-        content_type: Option<String>,
+    /// Submits every PDF in a directory to the document pipeline.
+    Batch {
+        /// Directory containing PDFs to submit.
+        directory: PathBuf,
     },
 }
 
 struct Runtime {
-    review_store: PostgresReviewStore,
     http_client: reqwest::Client,
-    grobid_url: String,
     restate_ingress_url: String,
     garage_pipeline: GaragePipelineService,
 }
@@ -80,8 +49,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
     let runtime = Runtime::from_env().await?;
     match cli.command {
-        Command::Pipeline(args) => run_pipeline_command(&runtime, args.command).await,
-        Command::Artifact(args) => run_artifact_command(&runtime, args.command).await,
+        Command::Single { identifier, pdf } => {
+            submit_file(&runtime, &pdf, identifier.as_deref()).await
+        }
+        Command::Batch { directory } => submit_batch(&runtime, &directory).await,
     }
 }
 
@@ -116,9 +87,7 @@ impl Runtime {
             review_store.clone(),
         );
         Ok(Self {
-            review_store,
             http_client,
-            grobid_url: env::var("GROBID_URL").unwrap_or_else(|_| "http://localhost:8070".into()),
             restate_ingress_url: env::var("RESTATE_INGRESS_URL")
                 .unwrap_or_else(|_| "http://localhost:8080".into()),
             garage_pipeline,
@@ -126,41 +95,14 @@ impl Runtime {
     }
 }
 
-async fn run_pipeline_command(
-    runtime: &Runtime,
-    command: PipelineCommand,
-) -> Result<(), Box<dyn Error>> {
-    match command {
-        PipelineCommand::Grobid { part, identifier } => {
-            let response = run_artifact_operation(
-                &runtime.review_store,
-                None,
-                runtime.http_client.clone(),
-                &runtime.grobid_url,
-                part,
-                identifier,
-                None,
-            )
-            .await?;
-            println!("{}", serde_json::to_string_pretty(&response)?);
-        }
-        PipelineCommand::Run { identifier, target } => match target.as_slice() {
-            [pdf] => submit_file(runtime, pdf, identifier.as_deref()).await?,
-            [batch, directory] if batch.as_os_str() == "batch" => {
-                if identifier.is_some() {
-                    return Err("--identifier is only valid for a single PDF".into());
-                }
-                let mut files = pdf_files(directory).await?;
-                files.sort();
-                if files.is_empty() {
-                    return Err(format!("{} contains no PDF files", directory.display()).into());
-                }
-                for file in files {
-                    submit_file(runtime, &file, None).await?;
-                }
-            }
-            _ => return Err("expected `pipeline run <pdf>` or `pipeline run batch <dir>`".into()),
-        },
+async fn submit_batch(runtime: &Runtime, directory: &PathBuf) -> Result<(), Box<dyn Error>> {
+    let mut files = pdf_files(directory).await?;
+    files.sort();
+    if files.is_empty() {
+        return Err(format!("{} contains no PDF files", directory.display()).into());
+    }
+    for file in files {
+        submit_file(runtime, &file, None).await?;
     }
     Ok(())
 }
@@ -225,69 +167,42 @@ async fn pdf_files(directory: &PathBuf) -> Result<Vec<PathBuf>, Box<dyn Error>> 
     Ok(files)
 }
 
-async fn run_artifact_command(
-    runtime: &Runtime,
-    command: ArtifactCommand,
-) -> Result<(), Box<dyn Error>> {
-    match command {
-        ArtifactCommand::Patch {
-            identifier,
-            replacement,
-            content_type,
-        } => {
-            let bytes = tokio::fs::read(&replacement).await?;
-            let content_type = content_type.unwrap_or_else(|| infer_content_type(&replacement));
-            let updated = runtime
-                .review_store
-                .patch_validation_artifact(identifier, &content_type, &bytes)
-                .await
-                .map_err(|error| std::io::Error::other(error.to_string()))?;
-            if !updated {
-                return Err("artifact is missing, resolved, or is not a validation failure".into());
-            }
-            println!(
-                "patched artifact {identifier} with {} bytes ({content_type})",
-                bytes.len()
-            );
-        }
-    }
-    Ok(())
-}
-
-fn infer_content_type(path: &std::path::Path) -> String {
-    match path.extension().and_then(|value| value.to_str()) {
-        Some(extension) if extension.eq_ignore_ascii_case("pdf") => "application/pdf",
-        Some(extension) if extension.eq_ignore_ascii_case("json") => "application/json",
-        Some(extension)
-            if extension.eq_ignore_ascii_case("xml") || extension.eq_ignore_ascii_case("tei") =>
-        {
-            "application/tei+xml"
-        }
-        _ => "application/octet-stream",
-    }
-    .into()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
 
     #[test]
-    fn parses_requested_pipeline_commands() {
-        let cli =
-            Cli::try_parse_from(["scepa-cli", "pipeline", "grobid", "output-validation", "42"])
-                .unwrap();
+    fn parses_only_single_and_batch_commands() {
+        let command_names = Cli::command()
+            .get_subcommands()
+            .map(|command| command.get_name().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(command_names, ["single", "batch"]);
+
+        let cli = Cli::try_parse_from([
+            "scepa-cli",
+            "single",
+            "--identifier",
+            "paper-debug",
+            "paper.pdf",
+        ])
+        .unwrap();
         assert!(matches!(
             cli.command,
-            Command::Pipeline(PipelineArgs {
-                command: PipelineCommand::Grobid {
-                    part: PipelinePart::OutputValidation,
-                    identifier: 42
-                }
-            })
+            Command::Single {
+                identifier: Some(identifier),
+                pdf
+            } if identifier == "paper-debug" && pdf == PathBuf::from("paper.pdf")
         ));
 
-        Cli::try_parse_from(["scepa-cli", "pipeline", "run", "batch", "papers"]).unwrap();
-        Cli::try_parse_from(["scepa-cli", "pipeline", "run", "paper.pdf"]).unwrap();
+        let cli = Cli::try_parse_from(["scepa-cli", "batch", "papers"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Batch { directory } if directory == PathBuf::from("papers")
+        ));
+
+        assert!(Cli::try_parse_from(["scepa-cli", "pipeline", "run", "paper.pdf"]).is_err());
+        assert!(Cli::try_parse_from(["scepa-cli", "artifact", "patch", "42", "fix.pdf"]).is_err());
     }
 }
