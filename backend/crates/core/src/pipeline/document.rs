@@ -12,12 +12,14 @@ use super::{
     grobid::{GrobidClient, GrobidExtractionService, GrobidValidationWarning},
     tei::{TeiConversionService, TeiDocument, TeiValidationWarning},
 };
+use crate::models::draft::DraftDocument;
 
 /// PostgreSQL-facing durability boundary for extracted document data.
 #[async_trait]
 pub trait DocumentArtifactStore: Send + Sync {
     async fn store_tei_xml(&self, pdf_hash: &str, tei_xml: &str) -> eros::Result<()>;
-    async fn store_draft_artifact(&self, pdf_hash: &str, draft: &TeiDocument) -> eros::Result<()>;
+    async fn store_draft_artifact(&self, pdf_hash: &str, draft: &DraftDocument)
+    -> eros::Result<()>;
 }
 
 /// Warning emitted by either stage of the composite document pipeline.
@@ -212,7 +214,7 @@ where
         })?;
 
         self.review_store
-            .store_draft_artifact(&pdf_hash, &document)
+            .store_draft_artifact(&pdf_hash, &DraftDocument::new(document.clone()))
             .await
             .map_err(|error| {
                 document_error(
@@ -298,7 +300,7 @@ mod tests {
     struct RecordingStore {
         failures: Arc<Mutex<Vec<FailureRecord>>>,
         teis: Arc<Mutex<Vec<(String, String)>>>,
-        drafts: Arc<Mutex<Vec<(String, TeiDocument)>>>,
+        drafts: Arc<Mutex<Vec<(String, DraftDocument)>>>,
     }
 
     #[async_trait]
@@ -322,7 +324,7 @@ mod tests {
         async fn store_draft_artifact(
             &self,
             pdf_hash: &str,
-            draft: &TeiDocument,
+            draft: &DraftDocument,
         ) -> eros::Result<()> {
             self.drafts
                 .lock()
