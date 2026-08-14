@@ -92,14 +92,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     )
     .with_debug_artifact_root(debug_artifact_root.clone());
     let api = api::router(AppState {
-        review_store,
-        typedb,
         garage_pipeline,
         http_client,
         restate_ingress_url,
-        restate_admin_url,
-        grobid_url,
-        debug_artifact_root: debug_artifact_root.into(),
     });
     let api_listener = TcpListener::bind(api_address).await?;
     let api_server = axum::serve(api_listener, api).into_future();

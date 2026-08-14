@@ -2,7 +2,7 @@
 
 SCEPA runs PDF extraction and TEI conversion as a durable Restate workflow.
 Garage stores immutable source PDFs by SHA-256, PostgreSQL indexes those
-objects and stores review cases, and Axum exposes the public and operator APIs.
+objects, and Axum exposes an API for uploading new documents.
 
 ## Repository layout
 
@@ -65,69 +65,7 @@ curl --request POST \
 
 The response contains the lowercase SHA-256 hash, Garage object key, and
 hash-keyed workflow ID. The PDF is written to Garage before its PostgreSQL
-index row and workflow submission are created. Download it again through the
-PostgreSQL index with:
-
-```bash
-curl --output paper.pdf \
-  http://localhost:3000/pdfs/{sha256}
-```
-
-Submit a PDF using a stable workflow ID:
-
-```bash
-curl --request POST \
-  --header 'content-type: application/pdf' \
-  --data-binary @paper.pdf \
-  http://localhost:3000/workflows/paper-123
-```
-
-Submission is asynchronous. Read the workflow output with:
-
-```bash
-curl http://localhost:3000/workflows/paper-123/output
-```
-
-The stable-ID endpoint uses the same Garage-first ingestion path. Restate
-receives only the PDF hash and loads the bytes through PostgreSQL and Garage.
-The same SHA-256 is stored as the TypeDB document's `pdf_hash` attribute.
-
-Review endpoints:
-
-```text
-GET  /review-cases?status=pending&limit=100
-GET  /review-cases/count
-GET  /review-cases/{id}
-GET  /review-cases/{id}/artifact
-POST /review-cases/{id}/resolve
-```
-
-Review-case metadata includes `pdf_hash` when the workflow has a stored source
-PDF. Download that source with:
-
-```bash
-curl --fail --show-error --output paper.pdf \
-  http://localhost:3000/pdfs/<pdf_hash>
-```
-
-Get the number of cases currently waiting for human review:
-
-```bash
-curl http://localhost:3000/review-cases/count
-```
-
-Resolve a retryable Grobid processing failure and resume its suspended workflow:
-
-```bash
-curl --request POST \
-  --header 'content-type: application/json' \
-  --data '{"decision":"retry"}' \
-  http://localhost:3000/review-cases/1/resolve
-```
-
-Use `{"decision":"abort"}` to terminate the suspended workflow instead.
-
-The health endpoint is `GET /healthz`.
+index row and workflow submission are created. This is the API's only route.
 
 ## Pipeline CLI
 
@@ -162,28 +100,3 @@ The JSON file is the pretty-printed typed `TeiDocument`. Debug logging is
 enabled by default in Compose with `scepa=debug`. For a locally started API
 server, use `RUST_LOG=scepa=debug`; change the output root with
 `DEBUG_ARTIFACT_ROOT`.
-
-## Pipeline API
-
-The matching HTTP operations are:
-
-```text
-POST  /pipeline/grobid/{input-validation|output-validation|execute}/{review_case_id}
-PATCH /pipeline/grobid/{input-validation|output-validation}/{review_case_id}
-POST  /pipeline/run/{workflow_id}                 application/pdf body
-POST  /pipeline/run/batch                         multipart PDF fields
-DELETE /pipeline/artifacts/{workflow_id}
-PATCH /review-cases/{review_case_id}/artifact     replacement artifact body
-```
-
-Deleting a pipeline's artifacts purges the retained Restate workflow, deletes
-its PostgreSQL review cases and removes generated TEI XML and JSON files. The
-content-addressed source PDF and its PostgreSQL index remain available through
-`GET /pdfs/{sha256}`. The operation is idempotent. An active workflow is killed
-before it is purged.
-
-Set the replacement artifact's media type with the `Content-Type` header.
-Artifact patches are accepted only while an input- or output-validation case is
-pending; processing artifacts are immutable. The validation-specific PATCH
-routes replace the artifact and immediately rerun that validation phase. The
-review-case artifact route only performs the replacement.
