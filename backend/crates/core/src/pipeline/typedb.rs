@@ -9,12 +9,17 @@ use typedb_driver::{
 };
 
 use crate::models::{
-    canonical::{
-        CanonicalAffiliation, CanonicalContribution, CanonicalContributor, CanonicalDocument,
-        CanonicalModel, CanonicalOrganization, CanonicalPublicationEvent,
-        CanonicalPublicationEventKind, CanonicalPublicationVenue,
-    },
+    canonical::{CanonicalModel, entities, relations},
     draft::TeiDocument,
+};
+use entities::{
+    document::TDocument, organization::TOrganization, person::TPerson,
+    publication_venue::TPublicationVenue,
+};
+use relations::{
+    affiliation::TAffiliation,
+    contribution::{ContributorKind, TContribution},
+    publication_event::TPublicationEvent,
 };
 
 /// Persistence boundary used by [`TypeDbService`].
@@ -146,24 +151,28 @@ impl CanonicalDocumentStore for TypeDbStore {
 
         let (query, rows) = document_insert_query(&model.document)?;
         transaction.query_with_rows(query, rows).await?;
-        for contributor in &model.contributors {
-            let (query, rows) = contribution_insert_query(&model.document, contributor)?;
+        for person in &model.persons {
+            let (query, rows) = person_insert_query(person.as_ref())?;
             transaction.query_with_rows(query, rows).await?;
         }
         for organization in &model.organizations {
-            let (query, rows) = organization_insert_query(organization)?;
+            let (query, rows) = organization_insert_query(organization.as_ref())?;
             transaction.query_with_rows(query, rows).await?;
         }
         for venue in &model.publication_venues {
-            let (query, rows) = publication_venue_insert_query(venue)?;
+            let (query, rows) = publication_venue_insert_query(venue.as_ref())?;
+            transaction.query_with_rows(query, rows).await?;
+        }
+        for contribution in &model.contributions {
+            let (query, rows) = contribution_insert_query(contribution.as_ref())?;
             transaction.query_with_rows(query, rows).await?;
         }
         for affiliation in &model.affiliations {
-            let (query, rows) = affiliation_insert_query(affiliation)?;
+            let (query, rows) = affiliation_insert_query(affiliation.as_ref())?;
             transaction.query_with_rows(query, rows).await?;
         }
         for event in &model.publication_events {
-            let (query, rows) = publication_event_insert_query(event)?;
+            let (query, rows) = publication_event_insert_query(event.as_ref())?;
             transaction.query_with_rows(query, rows).await?;
         }
         transaction.commit().await?;
@@ -175,11 +184,11 @@ impl CanonicalDocumentStore for TypeDbStore {
         old: &CanonicalModel,
         new: &CanonicalModel,
     ) -> eros::Result<CanonicalUpdateSummary> {
-        let document_changed = old.document != new.document;
+        let document_changed = document_value(&old.document) != document_value(&new.document);
         let summary = CanonicalUpdateSummary {
             document_changed,
-            contributors_deleted: old.contributors.len(),
-            contributors_inserted: new.contributors.len(),
+            contributors_deleted: old.persons.len(),
+            contributors_inserted: new.persons.len(),
             organizations_deleted: old.organizations.len(),
             organizations_inserted: new.organizations.len(),
             venues_deleted: old.publication_venues.len(),
@@ -204,8 +213,10 @@ impl CanonicalDocumentStore for TypeDbStore {
         let (query, rows) =
             document_relation_delete_query(&old.document, "publication_event", "work")?;
         transaction.query_with_rows(query, rows).await?;
-        for contributor in &old.contributors {
-            let (query, rows) = contribution_delete_query(&old.document, contributor)?;
+        let (query, rows) = document_relation_delete_query(&old.document, "contribution", "work")?;
+        transaction.query_with_rows(query, rows).await?;
+        for person in &old.persons {
+            let (query, rows) = person_delete_query(person.as_ref())?;
             transaction.query_with_rows(query, rows).await?;
         }
         for organization in &old.organizations {
@@ -221,24 +232,28 @@ impl CanonicalDocumentStore for TypeDbStore {
 
         let (query, rows) = document_insert_query(&new.document)?;
         transaction.query_with_rows(query, rows).await?;
-        for contributor in &new.contributors {
-            let (query, rows) = contribution_insert_query(&new.document, contributor)?;
+        for person in &new.persons {
+            let (query, rows) = person_insert_query(person.as_ref())?;
             transaction.query_with_rows(query, rows).await?;
         }
         for organization in &new.organizations {
-            let (query, rows) = organization_insert_query(organization)?;
+            let (query, rows) = organization_insert_query(organization.as_ref())?;
             transaction.query_with_rows(query, rows).await?;
         }
         for venue in &new.publication_venues {
-            let (query, rows) = publication_venue_insert_query(venue)?;
+            let (query, rows) = publication_venue_insert_query(venue.as_ref())?;
+            transaction.query_with_rows(query, rows).await?;
+        }
+        for contribution in &new.contributions {
+            let (query, rows) = contribution_insert_query(contribution.as_ref())?;
             transaction.query_with_rows(query, rows).await?;
         }
         for affiliation in &new.affiliations {
-            let (query, rows) = affiliation_insert_query(affiliation)?;
+            let (query, rows) = affiliation_insert_query(affiliation.as_ref())?;
             transaction.query_with_rows(query, rows).await?;
         }
         for event in &new.publication_events {
-            let (query, rows) = publication_event_insert_query(event)?;
+            let (query, rows) = publication_event_insert_query(event.as_ref())?;
             transaction.query_with_rows(query, rows).await?;
         }
 
@@ -341,7 +356,7 @@ pub type TypedbService<S> = TypeDbService<S>;
 /// Product-capitalised spelling of [`TypeDbService`].
 pub type TypeDBService<S> = TypeDbService<S>;
 
-fn document_insert_query(document: &CanonicalDocument) -> eros::Result<(String, GivenRows)> {
+fn document_insert_query(document: &Arc<dyn TDocument>) -> eros::Result<(String, GivenRows)> {
     let mut variables = vec!["document_id".to_owned(), "title".to_owned()];
     let mut declarations = vec!["$document_id: string", "$title: string"];
     let mut attributes = vec![
@@ -360,24 +375,17 @@ fn document_insert_query(document: &CanonicalDocument) -> eros::Result<(String, 
         values.push(pdf_hash.to_owned().into());
     }
 
-    match document {
-        CanonicalDocument::ResearchPaper(document) => {
-            if let Some(doi) = &document.doi {
-                variables.push("doi".to_owned());
-                declarations.push("$doi: string");
-                attributes.push("has doi == $doi".to_owned());
-                values.push(doi.clone().into());
-            }
-        }
-        CanonicalDocument::Book(document) => {
-            if let Some(isbn) = &document.isbn {
-                variables.push("isbn".to_owned());
-                declarations.push("$isbn: string");
-                attributes.push("has isbn == $isbn".to_owned());
-                values.push(isbn.clone().into());
-            }
-        }
-        CanonicalDocument::Document(_) | CanonicalDocument::Report(_) => {}
+    if let Some(doi) = document.doi() {
+        variables.push("doi".to_owned());
+        declarations.push("$doi: string");
+        attributes.push("has doi == $doi".to_owned());
+        values.push(doi.to_owned().into());
+    }
+    if let Some(isbn) = document.isbn() {
+        variables.push("isbn".to_owned());
+        declarations.push("$isbn: string");
+        attributes.push("has isbn == $isbn".to_owned());
+        values.push(isbn.to_owned().into());
     }
 
     let query = format!(
@@ -391,51 +399,66 @@ fn document_insert_query(document: &CanonicalDocument) -> eros::Result<(String, 
     Ok((query, rows))
 }
 
-fn contribution_insert_query(
-    document: &CanonicalDocument,
-    contributor: &CanonicalContributor,
-) -> eros::Result<(String, GivenRows)> {
-    let mut variables = vec!["document_id".to_owned(), "person_id".to_owned()];
-    let mut declarations = vec!["$document_id: string", "$person_id: string"];
+fn person_insert_query(person: &dyn TPerson) -> eros::Result<(String, GivenRows)> {
+    let mut variables = vec!["person_id".to_owned()];
+    let mut declarations = vec!["$person_id: string"];
     let mut person_attributes = vec!["has person_id == $person_id".to_owned()];
-    let mut values = vec![
-        document.document_id().to_owned().into(),
-        contributor.person.person_id.clone().into(),
-    ];
+    let mut values = vec![person.person_id().to_owned().into()];
 
-    if let Some(given_name) = &contributor.person.given_name {
+    if let Some(given_name) = person.given_name() {
         variables.push("given_name".to_owned());
         declarations.push("$given_name: string");
         person_attributes.push("has given_name == $given_name".to_owned());
-        values.push(given_name.clone().into());
+        values.push(given_name.to_owned().into());
     }
-    if let Some(family_name) = &contributor.person.family_name {
+    if let Some(family_name) = person.family_name() {
         variables.push("family_name".to_owned());
         declarations.push("$family_name: string");
         person_attributes.push("has family_name == $family_name".to_owned());
-        values.push(family_name.clone().into());
+        values.push(family_name.to_owned().into());
     }
-
-    let relation_type = match contributor.contribution {
-        CanonicalContribution::Authorship => "authorship",
-        CanonicalContribution::Contribution => "contribution",
-        CanonicalContribution::PeerReview => "peer_review",
-    };
     let query = format!(
-        "given {}; match $document isa document, has document_id == $document_id; \
-         insert $person isa person, {}; \
-         $contribution isa {}, links (contributor: $person, work: $document);",
+        "given {}; insert $person isa person, {};",
         declarations.join(", "),
         person_attributes.join(", "),
-        relation_type,
     );
     let mut rows = GivenRows::new(variables, 1);
     rows.push_row(values)?;
     Ok((query, rows))
 }
 
+fn contribution_insert_query(
+    contribution: &dyn TContribution,
+) -> eros::Result<(String, GivenRows)> {
+    let contributor = contribution.contributor();
+    let contributor_type = match contributor.contributor_kind() {
+        ContributorKind::Person => "person",
+        ContributorKind::Organization => "organization",
+    };
+    let contributor_id_type = match contributor.contributor_kind() {
+        ContributorKind::Person => "person_id",
+        ContributorKind::Organization => "organization_id",
+    };
+    let query = format!(
+        "given $document_id: string, $contributor_id: string; \
+         match $document isa document, has document_id == $document_id; \
+         $contributor isa {contributor_type}, has {contributor_id_type} == $contributor_id; \
+         insert $contribution isa {}, links (contributor: $contributor, work: $document);",
+        contribution.relation_type(),
+    );
+    let mut rows = GivenRows::new(
+        vec!["document_id".to_owned(), "contributor_id".to_owned()],
+        1,
+    );
+    rows.push_row(vec![
+        contribution.work().document_id().to_owned().into(),
+        contributor.contributor_id().to_owned().into(),
+    ])?;
+    Ok((query, rows))
+}
+
 fn organization_insert_query(
-    organization: &CanonicalOrganization,
+    organization: &dyn TOrganization,
 ) -> eros::Result<(String, GivenRows)> {
     let mut variables = vec!["organization_id".to_owned(), "organization_name".to_owned()];
     let mut declarations = vec!["$organization_id: string", "$organization_name: string"];
@@ -465,7 +488,7 @@ fn organization_insert_query(
 }
 
 fn publication_venue_insert_query(
-    venue: &CanonicalPublicationVenue,
+    venue: &dyn TPublicationVenue,
 ) -> eros::Result<(String, GivenRows)> {
     let mut variables = vec!["venue_id".to_owned(), "venue_name".to_owned()];
     let mut declarations = vec!["$venue_id: string", "$venue_name: string"];
@@ -494,35 +517,50 @@ fn publication_venue_insert_query(
     Ok((query, rows))
 }
 
-fn affiliation_insert_query(
-    affiliation: &CanonicalAffiliation,
-) -> eros::Result<(String, GivenRows)> {
-    let mut rows = GivenRows::new(
-        vec![
-            "person_id".to_owned(),
-            "organization_id".to_owned(),
-            "document_id".to_owned(),
-        ],
-        1,
+fn affiliation_insert_query(affiliation: &dyn TAffiliation) -> eros::Result<(String, GivenRows)> {
+    let mut variables = vec!["person_id".to_owned(), "organization_id".to_owned()];
+    let mut declarations = vec![
+        "$person_id: string".to_owned(),
+        "$organization_id: string".to_owned(),
+    ];
+    let mut matches = vec![
+        "$person isa person, has person_id == $person_id".to_owned(),
+        "$organization isa organization, has organization_id == $organization_id".to_owned(),
+    ];
+    let mut roles = vec![
+        "person: $person".to_owned(),
+        "organization: $organization".to_owned(),
+    ];
+    let mut values = vec![
+        affiliation.person().person_id().to_owned().into(),
+        affiliation
+            .organization()
+            .organization_id()
+            .to_owned()
+            .into(),
+    ];
+    for (index, evidence) in affiliation.evidence().iter().enumerate() {
+        let id = format!("evidence_id_{index}");
+        let entity = format!("evidence_{index}");
+        variables.push(id.clone());
+        declarations.push(format!("${id}: string"));
+        matches.push(format!("${entity} isa document, has document_id == ${id}"));
+        roles.push(format!("evidence: ${entity}"));
+        values.push(evidence.document_id().to_owned().into());
+    }
+    let query = format!(
+        "given {}; match {}; insert $affiliation isa affiliation, links ({});",
+        declarations.join(", "),
+        matches.join("; "),
+        roles.join(", ")
     );
-    rows.push_row(vec![
-        affiliation.person_id.clone().into(),
-        affiliation.organization_id.clone().into(),
-        affiliation.evidence_document_id.clone().into(),
-    ])?;
-    Ok((
-        "given $person_id: string, $organization_id: string, $document_id: string; \
-         match $person isa person, has person_id == $person_id; \
-         $organization isa organization, has organization_id == $organization_id; \
-         $document isa document, has document_id == $document_id; \
-         insert $affiliation isa affiliation, links (person: $person, organization: $organization, evidence: $document);"
-            .to_owned(),
-        rows,
-    ))
+    let mut rows = GivenRows::new(variables, 1);
+    rows.push_row(values)?;
+    Ok((query, rows))
 }
 
 fn publication_event_insert_query(
-    event: &CanonicalPublicationEvent,
+    event: &dyn TPublicationEvent,
 ) -> eros::Result<(String, GivenRows)> {
     let mut variables = vec!["document_id".to_owned(), "publication_date".to_owned()];
     let mut declarations = vec![
@@ -533,47 +571,42 @@ fn publication_event_insert_query(
     let mut roles = vec!["work: $document".to_owned()];
     let mut attributes = vec!["has publication_date == $publication_date".to_owned()];
     let mut values = vec![
-        event.work_document_id.clone().into(),
-        event.publication_date.into(),
+        event.work().document_id().to_owned().into(),
+        event.publication_date().into(),
     ];
-    if let Some(publisher_id) = &event.publisher_id {
+    if let Some(publisher) = event.publisher() {
         variables.push("publisher_id".to_owned());
         declarations.push("$publisher_id: string".to_owned());
         matches
             .push("$publisher isa organization, has organization_id == $publisher_id".to_owned());
         roles.push("publisher: $publisher".to_owned());
-        values.push(publisher_id.clone().into());
+        values.push(publisher.organization_id().to_owned().into());
     }
-    if let Some(venue_id) = &event.venue_id {
+    if let Some(venue) = event.venue() {
         variables.push("venue_id".to_owned());
         declarations.push("$venue_id: string".to_owned());
         matches.push("$venue isa publication_venue, has venue_id == $venue_id".to_owned());
         roles.push("venue: $venue".to_owned());
-        values.push(venue_id.clone().into());
+        values.push(venue.venue_id().to_owned().into());
     }
-    for (index, note) in event.publication_notes.iter().enumerate() {
+    for (index, note) in event.publication_notes().iter().enumerate() {
         let variable = format!("publication_note_{index}");
         variables.push(variable.clone());
         declarations.push(format!("${variable}: string"));
         attributes.push(format!("has publication_note == ${variable}"));
         values.push(note.clone().into());
     }
-    if let Some(version_number) = &event.version_number {
+    if let Some(version_number) = event.version_number() {
         variables.push("version_number".to_owned());
         declarations.push("$version_number: string".to_owned());
         attributes.push("has version_number == $version_number".to_owned());
-        values.push(version_number.clone().into());
+        values.push(version_number.to_owned().into());
     }
-    let relation_type = match event.kind {
-        CanonicalPublicationEventKind::Submission => "submission",
-        CanonicalPublicationEventKind::Acceptance => "acceptance",
-        CanonicalPublicationEventKind::Publication => "publication",
-    };
     let query = format!(
         "given {}; match {}; insert $event isa {}, links ({}), {};",
         declarations.join(", "),
         matches.join("; "),
-        relation_type,
+        event.relation_type(),
         roles.join(", "),
         attributes.join(", ")
     );
@@ -582,7 +615,7 @@ fn publication_event_insert_query(
     Ok((query, rows))
 }
 
-fn document_delete_query(document: &CanonicalDocument) -> eros::Result<(String, GivenRows)> {
+fn document_delete_query(document: &Arc<dyn TDocument>) -> eros::Result<(String, GivenRows)> {
     let mut rows = GivenRows::new(vec!["document_id".to_owned()], 1);
     rows.push_row(vec![document.document_id().to_owned().into()])?;
     Ok((
@@ -592,7 +625,7 @@ fn document_delete_query(document: &CanonicalDocument) -> eros::Result<(String, 
 }
 
 fn document_relation_delete_query(
-    document: &CanonicalDocument,
+    document: &Arc<dyn TDocument>,
     relation_type: &str,
     role: &str,
 ) -> eros::Result<(String, GivenRows)> {
@@ -609,7 +642,7 @@ fn document_relation_delete_query(
 }
 
 fn organization_delete_query(
-    organization: &CanonicalOrganization,
+    organization: &Arc<dyn TOrganization>,
 ) -> eros::Result<(String, GivenRows)> {
     let mut rows = GivenRows::new(vec!["organization_id".to_owned()], 1);
     rows.push_row(vec![organization.organization_id().to_owned().into()])?;
@@ -623,7 +656,7 @@ fn organization_delete_query(
 }
 
 fn publication_venue_delete_query(
-    venue: &CanonicalPublicationVenue,
+    venue: &Arc<dyn TPublicationVenue>,
 ) -> eros::Result<(String, GivenRows)> {
     let mut rows = GivenRows::new(vec!["venue_id".to_owned()], 1);
     rows.push_row(vec![venue.venue_id().to_owned().into()])?;
@@ -635,26 +668,14 @@ fn publication_venue_delete_query(
     ))
 }
 
-#[cfg(test)]
-fn document_identity_equal(old: &CanonicalDocument, new: &CanonicalDocument) -> bool {
-    old.entity_type() == new.entity_type()
-        && old.document_id() == new.document_id()
-        && old.pdf_hash() == new.pdf_hash()
-        && match (old, new) {
-            (CanonicalDocument::ResearchPaper(old), CanonicalDocument::ResearchPaper(new)) => {
-                old.doi == new.doi
-            }
-            (CanonicalDocument::Book(old), CanonicalDocument::Book(new)) => old.isbn == new.isbn,
-            (CanonicalDocument::Document(_), CanonicalDocument::Document(_)) => true,
-            (CanonicalDocument::Report(_), CanonicalDocument::Report(_)) => true,
-            _ => false,
-        }
+fn document_value(document: &Arc<dyn TDocument>) -> Option<serde_json::Value> {
+    serde_json::to_value(document).ok()
 }
 
 #[cfg(test)]
 fn document_title_update_query(
-    old: &CanonicalDocument,
-    new: &CanonicalDocument,
+    old: &Arc<dyn TDocument>,
+    new: &Arc<dyn TDocument>,
 ) -> eros::Result<(String, GivenRows)> {
     let mut rows = GivenRows::new(
         vec![
@@ -679,28 +700,14 @@ fn document_title_update_query(
     ))
 }
 
-fn contribution_delete_query(
-    document: &CanonicalDocument,
-    contributor: &CanonicalContributor,
-) -> eros::Result<(String, GivenRows)> {
-    let relation_type = match contributor.contribution {
-        CanonicalContribution::Authorship => "authorship",
-        CanonicalContribution::Contribution => "contribution",
-        CanonicalContribution::PeerReview => "peer_review",
-    };
-    let query = format!(
-        "given $document_id: string, $person_id: string; \
-         match $document isa document, has document_id == $document_id; \
-         $person isa person, has person_id == $person_id; \
-         $contribution isa {relation_type}, links (contributor: $person, work: $document); \
-         delete $contribution; delete $person;"
-    );
-    let mut rows = GivenRows::new(vec!["document_id".to_owned(), "person_id".to_owned()], 1);
-    rows.push_row(vec![
-        document.document_id().to_owned().into(),
-        contributor.person.person_id.clone().into(),
-    ])?;
-    Ok((query, rows))
+fn person_delete_query(person: &dyn TPerson) -> eros::Result<(String, GivenRows)> {
+    let mut rows = GivenRows::new(vec!["person_id".to_owned()], 1);
+    rows.push_row(vec![person.person_id().to_owned().into()])?;
+    Ok((
+        "given $person_id: string; match $person isa person, has person_id == $person_id; delete $person;"
+            .to_owned(),
+        rows,
+    ))
 }
 
 #[cfg(test)]
@@ -728,21 +735,21 @@ mod tests {
             old: &CanonicalModel,
             new: &CanonicalModel,
         ) -> eros::Result<CanonicalUpdateSummary> {
-            let document_changed = old.document != new.document;
-            let replace_document = !document_identity_equal(&old.document, &new.document);
+            if old == new {
+                return Ok(CanonicalUpdateSummary::default());
+            }
             Ok(CanonicalUpdateSummary {
-                document_changed,
-                contributors_deleted: old
-                    .contributors
-                    .iter()
-                    .filter(|row| replace_document || !new.contributors.contains(row))
-                    .count(),
-                contributors_inserted: new
-                    .contributors
-                    .iter()
-                    .filter(|row| replace_document || !old.contributors.contains(row))
-                    .count(),
-                ..CanonicalUpdateSummary::default()
+                document_changed: document_value(&old.document) != document_value(&new.document),
+                contributors_deleted: old.persons.len(),
+                contributors_inserted: new.persons.len(),
+                organizations_deleted: old.organizations.len(),
+                organizations_inserted: new.organizations.len(),
+                venues_deleted: old.publication_venues.len(),
+                venues_inserted: new.publication_venues.len(),
+                affiliations_deleted: old.affiliations.len(),
+                affiliations_inserted: new.affiliations.len(),
+                publication_events_deleted: old.publication_events.len(),
+                publication_events_inserted: new.publication_events.len(),
             })
         }
     }
@@ -811,13 +818,12 @@ mod tests {
     #[test]
     fn contribution_insert_links_person_to_document() {
         let canonical = CanonicalModel::try_from(&draft()).unwrap();
-        let (query, rows) =
-            contribution_insert_query(&canonical.document, &canonical.contributors[0]).unwrap();
+        let (query, rows) = contribution_insert_query(canonical.contributions[0].as_ref()).unwrap();
         let (_, values) = rows.into_parts();
 
         assert!(query.contains("isa authorship"));
-        assert!(query.contains("links (contributor: $person, work: $document)"));
-        assert_eq!(values[0].len(), 4);
+        assert!(query.contains("links (contributor: $contributor, work: $document)"));
+        assert_eq!(values[0].len(), 2);
     }
 
     #[test]
@@ -825,18 +831,19 @@ mod tests {
         let canonical = expanded_canonical();
 
         let (organization_query, _) =
-            organization_insert_query(&canonical.organizations[0]).unwrap();
-        let (affiliation_query, _) = affiliation_insert_query(&canonical.affiliations[0]).unwrap();
+            organization_insert_query(canonical.organizations[0].as_ref()).unwrap();
+        let (affiliation_query, _) =
+            affiliation_insert_query(canonical.affiliations[0].as_ref()).unwrap();
         let (venue_query, _) =
-            publication_venue_insert_query(&canonical.publication_venues[0]).unwrap();
+            publication_venue_insert_query(canonical.publication_venues[0].as_ref()).unwrap();
         let (event_query, event_rows) =
-            publication_event_insert_query(&canonical.publication_events[0]).unwrap();
+            publication_event_insert_query(canonical.publication_events[0].as_ref()).unwrap();
         let (_, event_values) = event_rows.into_parts();
 
         assert!(organization_query.contains("isa organization"));
         assert!(organization_query.contains("has organization_name"));
         assert!(affiliation_query.contains("isa affiliation"));
-        assert!(affiliation_query.contains("evidence: $document"));
+        assert!(affiliation_query.contains("evidence: $evidence_0"));
         assert!(venue_query.contains("isa journal"));
         assert!(venue_query.contains("has issn"));
         assert!(event_query.contains("isa publication"));
@@ -846,6 +853,10 @@ mod tests {
     }
 
     fn expanded_canonical() -> CanonicalModel {
+        CanonicalModel::try_from(&expanded_draft()).unwrap()
+    }
+
+    fn expanded_draft() -> TeiDocument {
         let mut draft = draft();
         draft.bibliography.authors[0].affiliation = Some("Example University".into());
         draft.bibliography.publisher = Some("Example Press".into());
@@ -857,7 +868,7 @@ mod tests {
             value: "1234-5678".into(),
             scope: IdentifierScope::Document,
         });
-        CanonicalModel::try_from(&draft).unwrap()
+        draft
     }
 
     #[tokio::test]
@@ -878,19 +889,22 @@ mod tests {
         let canonical = expanded_canonical();
         let queries = vec![
             document_insert_query(&canonical.document).unwrap().0,
-            contribution_insert_query(&canonical.document, &canonical.contributors[0])
+            person_insert_query(canonical.persons[0].as_ref())
                 .unwrap()
                 .0,
-            organization_insert_query(&canonical.organizations[0])
+            contribution_insert_query(canonical.contributions[0].as_ref())
                 .unwrap()
                 .0,
-            affiliation_insert_query(&canonical.affiliations[0])
+            organization_insert_query(canonical.organizations[0].as_ref())
                 .unwrap()
                 .0,
-            publication_venue_insert_query(&canonical.publication_venues[0])
+            affiliation_insert_query(canonical.affiliations[0].as_ref())
                 .unwrap()
                 .0,
-            publication_event_insert_query(&canonical.publication_events[0])
+            publication_venue_insert_query(canonical.publication_venues[0].as_ref())
+                .unwrap()
+                .0,
+            publication_event_insert_query(canonical.publication_events[0].as_ref())
                 .unwrap()
                 .0,
         ];
@@ -918,13 +932,9 @@ mod tests {
         service.ensure_schema().await.unwrap();
 
         let old = expanded_canonical();
-        let mut new = old.clone();
-        match &mut new.document {
-            CanonicalDocument::Document(document) => document.title = "Corrected title".into(),
-            CanonicalDocument::ResearchPaper(document) => document.title = "Corrected title".into(),
-            CanonicalDocument::Book(document) => document.title = "Corrected title".into(),
-            CanonicalDocument::Report(document) => document.title = "Corrected title".into(),
-        }
+        let mut changed_draft = expanded_draft();
+        changed_draft.bibliography.title = Some("Corrected title".into());
+        let new = CanonicalModel::try_from(&changed_draft).unwrap();
         let result = async {
             service.execute(&old).await?;
             service.execute_update(&old, &new).await.map(|_| ())
@@ -1031,11 +1041,12 @@ mod tests {
         let canonical = CanonicalModel::try_from(&draft()).unwrap();
         let (document_query, _) = document_delete_query(&canonical.document).unwrap();
         let (contribution_query, _) =
-            contribution_delete_query(&canonical.document, &canonical.contributors[0]).unwrap();
+            document_relation_delete_query(&canonical.document, "contribution", "work").unwrap();
+        let (person_query, _) = person_delete_query(canonical.persons[0].as_ref()).unwrap();
 
         assert!(document_query.contains("has document_id == $document_id"));
-        assert!(contribution_query.contains("has person_id == $person_id"));
-        assert!(contribution_query.contains("delete $contribution"));
+        assert!(contribution_query.contains("delete $relation"));
+        assert!(person_query.contains("has person_id == $person_id"));
     }
 
     #[test]
@@ -1046,7 +1057,8 @@ mod tests {
         let new = CanonicalModel::try_from(&changed_draft).unwrap();
         let (query, _) = document_title_update_query(&old.document, &new.document).unwrap();
 
-        assert!(document_identity_equal(&old.document, &new.document));
+        assert_eq!(old.document.document_id(), new.document.document_id());
+        assert_eq!(old.document.entity_type(), new.document.entity_type());
         assert!(query.contains("delete has $old_title of $document"));
         assert!(query.contains("insert $document has title == $new_title"));
     }
@@ -1077,7 +1089,7 @@ mod tests {
 
         assert_eq!(canonical.document.document_id(), format!("sha256:{hash}"));
         assert_eq!(canonical.document.pdf_hash(), Some(hash.as_str()));
-        assert!(matches!(canonical.document, CanonicalDocument::Document(_)));
+        assert_eq!(canonical.document.entity_type(), "document");
     }
 
     #[tokio::test]

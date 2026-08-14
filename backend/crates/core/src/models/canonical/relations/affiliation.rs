@@ -1,35 +1,46 @@
 //! The `affiliation` relation and its roles.
 
 use nonempty_collections::NEVec;
-use std::rc::Rc;
+use std::sync::Arc;
 
-pub trait TAffiliation {
-    fn person(&self) -> &Rc<dyn TPerson>;
-    fn organization(&self) -> &Rc<dyn TOrganization>;
-    fn evidence(&self) -> &[Rc<dyn TEvidence>];
+#[typetag::serde(tag = "type")]
+pub trait TAffiliation: Send + Sync {
+    fn person(&self) -> &Arc<dyn TPerson>;
+    fn organization(&self) -> &Arc<dyn TOrganization>;
+    fn evidence(&self) -> &[Arc<dyn TEvidence>];
 }
 
-pub trait TPerson {}
-pub trait TOrganization {}
-pub trait TEvidence {}
+#[typetag::serde(tag = "type")]
+pub trait TPerson: Send + Sync {
+    fn person_id(&self) -> &str;
+}
+#[typetag::serde(tag = "type")]
+pub trait TOrganization: Send + Sync {
+    fn organization_id(&self) -> &str;
+}
+#[typetag::serde(tag = "type")]
+pub trait TEvidence: Send + Sync {
+    fn document_id(&self) -> &str;
+}
 
-#[derive(bon::Builder)]
+#[derive(serde::Serialize, serde::Deserialize, bon::Builder)]
 pub struct Affiliation {
-    pub person: Rc<dyn TPerson>,
-    pub organization: Rc<dyn TOrganization>,
-    pub evidence: NEVec<Rc<dyn TEvidence>>,
+    pub person: Arc<dyn TPerson>,
+    pub organization: Arc<dyn TOrganization>,
+    pub evidence: NEVec<Arc<dyn TEvidence>>,
 }
 
+#[typetag::serde(name = "affiliation")]
 impl TAffiliation for Affiliation {
-    fn person(&self) -> &Rc<dyn TPerson> {
+    fn person(&self) -> &Arc<dyn TPerson> {
         &self.person
     }
 
-    fn organization(&self) -> &Rc<dyn TOrganization> {
+    fn organization(&self) -> &Arc<dyn TOrganization> {
         &self.organization
     }
 
-    fn evidence(&self) -> &[Rc<dyn TEvidence>] {
+    fn evidence(&self) -> &[Arc<dyn TEvidence>] {
         self.evidence.as_ref().as_slice()
     }
 }
