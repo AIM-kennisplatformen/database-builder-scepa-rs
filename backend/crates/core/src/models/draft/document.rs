@@ -76,6 +76,12 @@ impl DraftDocument {
         if let Some(value) = &manual.journal_abbreviation {
             effective.bibliography.journal_abbreviation = Some(value.clone());
         }
+        if let Some(value) = &manual.abstract_text {
+            effective.bibliography.abstract_text = value.clone();
+        }
+        if let Some(value) = &self.manual_data.body_text {
+            effective.body_text = value.clone();
+        }
 
         effective
     }
@@ -83,13 +89,15 @@ impl DraftDocument {
 
 /// Human-authored values that may override extraction for canonicalisation.
 ///
-/// This deliberately covers document metadata, contributors and identifiers:
-/// the parts of a TEI document that feed the canonical graph. Body passages,
-/// figures and citations remain immutable extraction evidence.
+/// Besides metadata, operators can correct the abstract/body classification and
+/// the text or source coordinates of passages. The extracted layer remains
+/// immutable; populated passage fields replace it only in the effective view.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ManualDocument {
     pub bibliography: ManualBibliography,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body_text: Option<Vec<Passage>>,
 }
 
 /// Sparse bibliography patch. `None` means “use the extracted value”; for
@@ -113,6 +121,8 @@ pub struct ManualBibliography {
     pub journal: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub journal_abbreviation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub abstract_text: Option<Vec<crate::models::draft::passage::TextPassage>>,
 }
 
 #[cfg(test)]
@@ -148,6 +158,8 @@ mod tests {
         let mut draft = DraftDocument::new(extracted());
         draft.manual_data.bibliography.title = Some("Reviewed title".into());
         draft.manual_data.bibliography.authors = Some(vec![]);
+        draft.manual_data.body_text = Some(vec![]);
+        draft.manual_data.bibliography.abstract_text = Some(vec![]);
 
         let effective = draft.effective_document();
         assert_eq!(
@@ -155,6 +167,8 @@ mod tests {
             Some("Reviewed title")
         );
         assert!(effective.bibliography.authors.is_empty());
+        assert!(effective.body_text.is_empty());
+        assert!(effective.bibliography.abstract_text.is_empty());
         assert_eq!(
             draft.extracted_data.bibliography.title.as_deref(),
             Some("Extracted title")
