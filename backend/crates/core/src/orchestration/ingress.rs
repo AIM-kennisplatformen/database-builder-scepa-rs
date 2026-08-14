@@ -3,11 +3,21 @@
 use reqwest::{Client, Url};
 use serde::Deserialize;
 
-use super::{NewDocumentWorkflowRequest, NewDocumentWorkflowResponse};
+use super::{
+    NewDocumentWorkflowRequest, NewDocumentWorkflowResponse, UpdateDocumentWorkflowRequest,
+    UpdateDocumentWorkflowResponse,
+};
 
 /// Client for submitting documents to the durable new-document workflow.
 #[derive(Clone)]
 pub struct NewDocumentIngressClient {
+    client: Client,
+    ingress_url: Url,
+}
+
+/// Client for invoking durable updates of already-published documents.
+#[derive(Clone)]
+pub struct UpdateDocumentIngressClient {
     client: Client,
     ingress_url: Url,
 }
@@ -182,6 +192,53 @@ impl NewDocumentIngressClient {
             .push("attach");
         drop(segments);
         Ok(url)
+    }
+}
+
+impl UpdateDocumentIngressClient {
+    pub fn new(ingress_url: &str) -> std::io::Result<Self> {
+        Ok(Self {
+            client: Client::new(),
+            ingress_url: Url::parse(ingress_url).map_err(invalid_input)?,
+        })
+    }
+
+    pub async fn run(
+        &self,
+        workflow_id: &str,
+        request: UpdateDocumentWorkflowRequest,
+    ) -> std::io::Result<UpdateDocumentWorkflowResponse> {
+        if workflow_id.is_empty() {
+            return Err(invalid_input("workflow identifier must not be empty"));
+        }
+        let mut url = self.ingress_url.clone();
+        let mut segments = url
+            .path_segments_mut()
+            .map_err(|()| invalid_input("Restate ingress URL cannot be a base URL"))?;
+        segments
+            .pop_if_empty()
+            .push("restate")
+            .push("call")
+            .push("UpdateDocumentWorkflow")
+            .push(workflow_id)
+            .push("run");
+        drop(segments);
+
+        let response = self
+            .client
+            .post(url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(connection_error)?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(std::io::Error::other(format!(
+                "UpdateDocumentWorkflow {workflow_id} failed through Restate with {status}: {body}"
+            )));
+        }
+        response.json().await.map_err(connection_error)
     }
 }
 

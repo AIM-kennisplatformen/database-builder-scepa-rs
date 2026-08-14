@@ -4,15 +4,19 @@ mod ingress;
 mod restate;
 mod workflows;
 
-pub use ingress::{NewDocumentIngressClient, NewDocumentWorkflowHandle};
+pub use ingress::{
+    NewDocumentIngressClient, NewDocumentWorkflowHandle, UpdateDocumentIngressClient,
+};
 
 pub use restate::{
     DocumentRestateService, GarageRestateService, GrobidRestateService, LinkWorkflowPdfRequest,
-    PipelineExecuteRequest, PipelineExecuteResponse, TeiRestateService, TypeDbExecuteRequest,
-    TypeDbRestateService,
+    PipelineExecuteRequest, PipelineExecuteResponse, PublishedArtifactRestateService,
+    StorePublishedArtifactRequest, TeiRestateService, TypeDbExecuteRequest, TypeDbRestateService,
+    TypeDbUpdateRequest, TypeDbUpdateResponse,
 };
 pub use workflows::{
     DocumentExtractionWorkflow, DocumentExtractionWorkflowRequest,
     DocumentExtractionWorkflowResponse, NewDocumentWorkflow, NewDocumentWorkflowRequest,
-    NewDocumentWorkflowResponse,
+    NewDocumentWorkflowResponse, UpdateDocumentWorkflow, UpdateDocumentWorkflowRequest,
+    UpdateDocumentWorkflowResponse,
 };

@@ -19,6 +19,23 @@ pub struct DocumentArtifacts {
     pub updated_at: String,
 }
 
+/// A document that has successfully reached the canonical graph.
+#[derive(Clone, Debug, Serialize)]
+pub struct PublishedDocument {
+    pub pdf_hash: String,
+    pub artifact: DraftDocument,
+    pub published_at: String,
+}
+
+/// Metadata used by the update-document picker.
+#[derive(Clone, Debug, Serialize)]
+pub struct PublishedDocumentSummary {
+    pub pdf_hash: String,
+    pub title: Option<String>,
+    pub identifiers: Vec<crate::models::draft::Identifier>,
+    pub published_at: String,
+}
+
 /// A durable, idempotent [`ReviewStore`] backed by PostgreSQL.
 ///
 /// An orchestrator can replay a successful database write before journaling
@@ -195,6 +212,83 @@ impl PostgresReviewStore {
         .await?;
 
         Ok(result.rows_affected() == 1)
+    }
+
+    /// Records the exact artifact that was accepted by the canonical graph.
+    pub async fn store_published_artifact(
+        &self,
+        pdf_hash: &str,
+        artifact: &DraftDocument,
+    ) -> eros::Result<bool> {
+        let result = sqlx::query(
+            r#"
+            UPDATE document_artifacts
+            SET draft_artifact = $2,
+                published_artifact = $2,
+                published_at = now(),
+                updated_at = now()
+            WHERE pdf_hash = $1
+            "#,
+        )
+        .bind(pdf_hash)
+        .bind(serde_json::to_value(artifact)?)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() == 1)
+    }
+
+    /// Loads the last artifact successfully accepted by TypeDB.
+    pub async fn get_published_document(
+        &self,
+        pdf_hash: &str,
+    ) -> eros::Result<Option<PublishedDocument>> {
+        let row: Option<(serde_json::Value, String)> = sqlx::query_as(
+            r#"
+            SELECT published_artifact, published_at::text
+            FROM document_artifacts
+            WHERE pdf_hash = $1 AND published_artifact IS NOT NULL
+            "#,
+        )
+        .bind(pdf_hash)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|(artifact, published_at)| {
+            Ok(PublishedDocument {
+                pdf_hash: pdf_hash.to_owned(),
+                artifact: serde_json::from_value(artifact)?,
+                published_at,
+            })
+        })
+        .transpose()
+    }
+
+    /// Lists only documents that completed canonical publication successfully.
+    pub async fn list_published_documents(&self) -> eros::Result<Vec<PublishedDocumentSummary>> {
+        let rows: Vec<(String, serde_json::Value, String)> = sqlx::query_as(
+            r#"
+            SELECT pdf_hash, published_artifact, published_at::text
+            FROM document_artifacts
+            WHERE published_artifact IS NOT NULL
+            ORDER BY published_at DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|(pdf_hash, value, published_at)| {
+                let artifact: DraftDocument = serde_json::from_value(value)?;
+                let effective = artifact.effective_document();
+                Ok(PublishedDocumentSummary {
+                    pdf_hash,
+                    title: effective.bibliography.title,
+                    identifiers: effective.bibliography.identifiers,
+                    published_at,
+                })
+            })
+            .collect()
     }
 
     /// Loads all representations currently available for one document.

@@ -13,13 +13,16 @@ use scepa::{
         canonical::CanonicalModel,
         draft::{DraftDocument, ManualDocument},
     },
-    orchestration::{NewDocumentIngressClient, NewDocumentWorkflowResponse},
+    orchestration::{
+        NewDocumentIngressClient, NewDocumentWorkflowResponse, UpdateDocumentIngressClient,
+        UpdateDocumentWorkflowRequest, UpdateDocumentWorkflowResponse,
+    },
     pipeline::{
         PipelineService,
         garage::{GaragePipelineService, StoredPdf, sha256_hex},
         typedb::{TypeDbService, TypeDbStore},
     },
-    postgres::PostgresReviewStore,
+    postgres::{PostgresReviewStore, PublishedDocument, PublishedDocumentSummary},
 };
 use serde::Serialize;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
@@ -29,6 +32,7 @@ const MAX_PDF_BYTES: usize = 64 * 1024 * 1024;
 #[derive(Clone)]
 pub struct AppState {
     workflows: NewDocumentIngressClient,
+    updates: UpdateDocumentIngressClient,
     pdfs: GaragePipelineService,
     drafts: PostgresReviewStore,
     typedb: TypeDbService<TypeDbStore>,
@@ -37,12 +41,14 @@ pub struct AppState {
 impl AppState {
     pub fn new(
         workflows: NewDocumentIngressClient,
+        updates: UpdateDocumentIngressClient,
         pdfs: GaragePipelineService,
         drafts: PostgresReviewStore,
         typedb: TypeDbService<TypeDbStore>,
     ) -> Self {
         Self {
             workflows,
+            updates,
             pdfs,
             drafts,
             typedb,
@@ -89,6 +95,11 @@ pub fn router(state: AppState) -> Router {
         .route("/pdfs/{pdf_hash}", get(download_pdf))
         .route("/pdfs/submissions/{workflow_id}", post(submit_pdf))
         .route("/drafts/{pdf_hash}", get(get_draft).put(publish_draft))
+        .route("/documents", get(list_documents))
+        .route(
+            "/documents/{pdf_hash}",
+            get(get_published_document).put(update_document),
+        )
         .layer(DefaultBodyLimit::max(MAX_PDF_BYTES))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -225,11 +236,68 @@ async fn publish_draft(
         .await
         .map_err(|error| ApiError(StatusCode::UNPROCESSABLE_ENTITY, error.to_string()))?;
     state.typedb.execute(&canonical).await.map_err(internal)?;
+    if !state
+        .drafts
+        .store_published_artifact(&pdf_hash, &draft)
+        .await
+        .map_err(internal)?
+    {
+        return Err(ApiError(
+            StatusCode::NOT_FOUND,
+            "document draft not found".into(),
+        ));
+    }
 
     Ok(Json(PublishResponse {
         artifact: DraftResponse { pdf_hash, draft },
         canonical,
     }))
+}
+
+async fn list_documents(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<PublishedDocumentSummary>>, ApiError> {
+    Ok(Json(
+        state
+            .drafts
+            .list_published_documents()
+            .await
+            .map_err(internal)?,
+    ))
+}
+
+async fn get_published_document(
+    State(state): State<AppState>,
+    Path(pdf_hash): Path<String>,
+) -> Result<Json<PublishedDocument>, ApiError> {
+    state
+        .drafts
+        .get_published_document(&pdf_hash)
+        .await
+        .map_err(internal)?
+        .map(Json)
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "published document not found".into()))
+}
+
+async fn update_document(
+    State(state): State<AppState>,
+    Path(pdf_hash): Path<String>,
+    Json(manual_data): Json<ManualDocument>,
+) -> Result<Json<UpdateDocumentWorkflowResponse>, ApiError> {
+    let revision = sha256_hex(&serde_json::to_vec(&manual_data).map_err(internal)?);
+    let workflow_id = format!("{pdf_hash}:update:{revision}");
+    let result = state
+        .updates
+        .run(
+            &workflow_id,
+            UpdateDocumentWorkflowRequest {
+                pdf_hash,
+                manual_data,
+            },
+        )
+        .await
+        .map_err(bad_gateway)?;
+    Ok(Json(result))
 }
 
 fn bad_gateway(error: impl std::fmt::Display) -> ApiError {

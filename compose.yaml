@@ -5,8 +5,34 @@ services:
       context: ./backend
     environment:
       RUST_LOG: ${RUST_LOG}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      TYPEDB_ADDRESS: typedb:1729
+      TYPEDB_DATABASE: ${TYPEDB_DATABASE}
+      TYPEDB_USERNAME: ${TYPEDB_USERNAME}
+      TYPEDB_PASSWORD: ${TYPEDB_PASSWORD}
+      GROBID_URL: http://grobid:8070
+      GARAGE_ENDPOINT: http://garage:3900
+      GARAGE_REGION: ${GARAGE_REGION}
+      GARAGE_BUCKET: ${GARAGE_BUCKET}
+      GARAGE_ACCESS_KEY: ${GARAGE_ACCESS_KEY}
+      GARAGE_SECRET_KEY: ${GARAGE_SECRET_KEY}
+      RESTATE_INGRESS_URL: http://restate:8080
+      RESTATE_ADMIN_URL: http://restate:9070
+      RESTATE_DEPLOYMENT_URL: http://app:9080
+      RESTATE_ENDPOINT_ADDRESS: 0.0.0.0:9080
     ports:
       - "${API_PORT}:3000"
+    depends_on:
+      garage:
+        condition: service_healthy
+      grobid:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      restate:
+        condition: service_healthy
+      typedb:
+        condition: service_healthy
     restart: unless-stopped
 
   typedb:

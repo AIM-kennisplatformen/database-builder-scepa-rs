@@ -1,8 +1,8 @@
 # SCEPA
 
 SCEPA contains the PDF extraction, TEI conversion, storage, API, and CLI
-building blocks for a document pipeline. The upload implementations are left
-as explicit `todo!()` placeholders while orchestration is being redesigned.
+building blocks for a document pipeline. Uploads are stored in Garage before
+the durable `NewDocumentWorkflow` is invoked with the PDF's content hash.
 
 ## Repository layout
 
@@ -50,8 +50,8 @@ The stack exposes:
 
 ## API
 
-The API reserves `POST /pdfs` for uploading a PDF. Its handler is currently a
-`todo!()` placeholder.
+`POST /pdfs` submits a PDF to `NewDocumentWorkflow`, using its SHA-256 hash as
+the workflow identifier, and waits for the workflow result.
 
 ```bash
 curl --request POST \
@@ -60,11 +60,13 @@ curl --request POST \
   http://localhost:3000/pdfs
 ```
 
-This is the API's only route.
+`POST /pdfs/submissions/{workflow_id}` stores the PDF and starts the workflow
+without waiting for its result. The CLI uses this asynchronous route.
 
 ## Pipeline CLI
 
-The CLI reserves two upload commands; both currently end in `todo!()`:
+The CLI sends uploads to `SCEPA_API_URL` (default `http://localhost:3000`) and
+provides single-file and directory upload commands:
 
 ```bash
 scepa-cli single paper.pdf
