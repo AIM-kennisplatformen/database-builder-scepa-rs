@@ -1,7 +1,17 @@
 //! Root canonical model and conversion from the extraction draft.
 
-use super::entities::document::{Book, Document, ResearchPaper};
+use std::collections::HashMap;
+
+use chrono::{DateTime, NaiveDate, NaiveDateTime};
+use sha2::{Digest, Sha256};
+
+use super::entities::document::{Book, Document, Report, ResearchPaper};
+use super::entities::organization::{
+    EducationalInstitution, GovernmentInstitution, Institution, NonprofitInstitution, Organization,
+    Publisher,
+};
 use super::entities::person::Person;
+use super::entities::publication_venue::{Conference, Journal};
 use crate::models::draft::{ContributorRole, Identifier, IdentifierKind, TeiDocument};
 
 /// The complete canonical value accepted by persistence services.
@@ -9,6 +19,10 @@ use crate::models::draft::{ContributorRole, Identifier, IdentifierKind, TeiDocum
 pub struct CanonicalModel {
     pub document: CanonicalDocument,
     pub contributors: Vec<CanonicalContributor>,
+    pub organizations: Vec<CanonicalOrganization>,
+    pub publication_venues: Vec<CanonicalPublicationVenue>,
+    pub affiliations: Vec<CanonicalAffiliation>,
+    pub publication_events: Vec<CanonicalPublicationEvent>,
 }
 
 /// A canonical person and their contribution to the model's document.
@@ -23,6 +37,131 @@ pub struct CanonicalContributor {
 pub enum CanonicalContribution {
     Authorship,
     Contribution,
+    PeerReview,
+}
+
+/// An organization entity supported by the TypeDB schema.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CanonicalOrganization {
+    Organization(Organization),
+    Institution(Institution),
+    GovernmentInstitution(GovernmentInstitution),
+    EducationalInstitution(EducationalInstitution),
+    NonprofitInstitution(NonprofitInstitution),
+    Publisher(Publisher),
+}
+
+impl CanonicalOrganization {
+    pub fn organization_id(&self) -> &str {
+        match self {
+            Self::Organization(value) => &value.organization_id,
+            Self::Institution(value) => &value.organization_id,
+            Self::GovernmentInstitution(value) => &value.organization_id,
+            Self::EducationalInstitution(value) => &value.organization_id,
+            Self::NonprofitInstitution(value) => &value.organization_id,
+            Self::Publisher(value) => &value.organization_id,
+        }
+    }
+
+    pub fn organization_name(&self) -> &str {
+        match self {
+            Self::Organization(value) => &value.organization_name,
+            Self::Institution(value) => &value.organization_name,
+            Self::GovernmentInstitution(value) => &value.organization_name,
+            Self::EducationalInstitution(value) => &value.organization_name,
+            Self::NonprofitInstitution(value) => &value.organization_name,
+            Self::Publisher(value) => &value.organization_name,
+        }
+    }
+
+    pub fn ror_id(&self) -> Option<&str> {
+        match self {
+            Self::Organization(value) => value.ror_id.as_deref(),
+            Self::Institution(value) => value.ror_id.as_deref(),
+            Self::GovernmentInstitution(value) => value.ror_id.as_deref(),
+            Self::EducationalInstitution(value) => value.ror_id.as_deref(),
+            Self::NonprofitInstitution(value) => value.ror_id.as_deref(),
+            Self::Publisher(value) => value.ror_id.as_deref(),
+        }
+    }
+
+    pub fn entity_type(&self) -> &'static str {
+        match self {
+            Self::Organization(_) => "organization",
+            Self::Institution(_) => "institution",
+            Self::GovernmentInstitution(_) => "government_institution",
+            Self::EducationalInstitution(_) => "educational_institution",
+            Self::NonprofitInstitution(_) => "nonprofit_institution",
+            Self::Publisher(_) => "publisher",
+        }
+    }
+}
+
+/// A publication venue entity supported by the TypeDB schema.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CanonicalPublicationVenue {
+    Journal(Journal),
+    Conference(Conference),
+}
+
+impl CanonicalPublicationVenue {
+    pub fn venue_id(&self) -> &str {
+        match self {
+            Self::Journal(value) => &value.venue_id,
+            Self::Conference(value) => &value.venue_id,
+        }
+    }
+
+    pub fn venue_name(&self) -> &str {
+        match self {
+            Self::Journal(value) => &value.venue_name,
+            Self::Conference(value) => &value.venue_name,
+        }
+    }
+
+    pub fn issn(&self) -> Option<&str> {
+        match self {
+            Self::Journal(value) => value.issn.as_deref(),
+            Self::Conference(value) => value.issn.as_deref(),
+        }
+    }
+
+    pub fn entity_type(&self) -> &'static str {
+        match self {
+            Self::Journal(_) => "journal",
+            Self::Conference(_) => "conference",
+        }
+    }
+}
+
+/// ID-linked representation of the schema's affiliation relation.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CanonicalAffiliation {
+    pub person_id: String,
+    pub organization_id: String,
+    pub evidence_document_id: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CanonicalPublicationEventKind {
+    Submission,
+    Acceptance,
+    Publication,
+}
+
+/// ID-linked representation of a publication-event relation.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CanonicalPublicationEvent {
+    pub kind: CanonicalPublicationEventKind,
+    pub work_document_id: String,
+    pub publisher_id: Option<String>,
+    pub venue_id: Option<String>,
+    pub publication_date: NaiveDateTime,
+    pub publication_notes: Vec<String>,
+    pub version_number: Option<String>,
 }
 
 /// A document in the canonical domain model.
@@ -35,6 +174,7 @@ pub enum CanonicalDocument {
     Document(Document),
     ResearchPaper(ResearchPaper),
     Book(Book),
+    Report(Report),
 }
 
 impl CanonicalDocument {
@@ -43,6 +183,7 @@ impl CanonicalDocument {
             Self::Document(document) => &document.document_id,
             Self::ResearchPaper(document) => &document.document_id,
             Self::Book(document) => &document.document_id,
+            Self::Report(document) => &document.document_id,
         }
     }
 
@@ -51,6 +192,7 @@ impl CanonicalDocument {
             Self::Document(document) => document.pdf_hash.as_deref(),
             Self::ResearchPaper(document) => document.pdf_hash.as_deref(),
             Self::Book(document) => document.pdf_hash.as_deref(),
+            Self::Report(document) => document.pdf_hash.as_deref(),
         }
     }
 
@@ -59,6 +201,7 @@ impl CanonicalDocument {
             Self::Document(document) => document.pdf_hash = Some(pdf_hash),
             Self::ResearchPaper(document) => document.pdf_hash = Some(pdf_hash),
             Self::Book(document) => document.pdf_hash = Some(pdf_hash),
+            Self::Report(document) => document.pdf_hash = Some(pdf_hash),
         }
     }
 
@@ -67,6 +210,7 @@ impl CanonicalDocument {
             Self::Document(document) => &document.title,
             Self::ResearchPaper(document) => &document.title,
             Self::Book(document) => &document.title,
+            Self::Report(document) => &document.title,
         }
     }
 
@@ -75,6 +219,7 @@ impl CanonicalDocument {
             Self::Document(_) => "document",
             Self::ResearchPaper(_) => "research_paper",
             Self::Book(_) => "book",
+            Self::Report(_) => "report",
         }
     }
 
@@ -216,9 +361,77 @@ impl CanonicalModel {
             })
             .collect::<eros::Result<Vec<_>>>()?;
 
+        let mut organizations = Vec::new();
+        let mut organization_ids_by_name = HashMap::new();
+        let mut affiliations = Vec::new();
+        for (source, canonical) in draft.bibliography.authors.iter().zip(&contributors) {
+            let Some(organization_name) = non_empty(source.affiliation.as_deref()) else {
+                continue;
+            };
+            let normalized_name = normalize_name(organization_name);
+            let organization_id = organization_ids_by_name
+                .entry(normalized_name.clone())
+                .or_insert_with(|| {
+                    let organization_id =
+                        scoped_id(document.document_id(), "organization", &normalized_name);
+                    organizations.push(CanonicalOrganization::Organization(Organization {
+                        organization_id: organization_id.clone(),
+                        organization_name: organization_name.to_owned(),
+                        ror_id: None,
+                    }));
+                    organization_id
+                })
+                .clone();
+            affiliations.push(CanonicalAffiliation {
+                person_id: canonical.person.person_id.clone(),
+                organization_id,
+                evidence_document_id: document.document_id().to_owned(),
+            });
+        }
+
+        let mut publication_venues = Vec::new();
+        let mut publication_events = Vec::new();
+        if let Some(publication_date) = publication_datetime(draft) {
+            let publisher_id = non_empty(draft.bibliography.publisher.as_deref()).map(|name| {
+                let id = scoped_id(document.document_id(), "publisher", &normalize_name(name));
+                organizations.push(CanonicalOrganization::Publisher(Publisher {
+                    organization_id: id.clone(),
+                    organization_name: name.to_owned(),
+                    ror_id: None,
+                }));
+                id
+            });
+            let venue_id = non_empty(draft.bibliography.journal.as_deref()).map(|name| {
+                let id = scoped_id(document.document_id(), "journal", &normalize_name(name));
+                let issn = identifier(&draft.bibliography.identifiers, |kind| {
+                    matches!(kind, IdentifierKind::Issn)
+                })
+                .map(str::to_owned);
+                publication_venues.push(CanonicalPublicationVenue::Journal(Journal {
+                    venue_id: id.clone(),
+                    issn,
+                    venue_name: name.to_owned(),
+                }));
+                id
+            });
+            publication_events.push(CanonicalPublicationEvent {
+                kind: CanonicalPublicationEventKind::Publication,
+                work_document_id: document.document_id().to_owned(),
+                publisher_id,
+                venue_id,
+                publication_date,
+                publication_notes: Vec::new(),
+                version_number: None,
+            });
+        }
+
         Ok(Self {
             document,
             contributors,
+            organizations,
+            publication_venues,
+            affiliations,
+            publication_events,
         })
     }
 }
@@ -240,6 +453,54 @@ fn identifier(
         .iter()
         .find(|identifier| matches_kind(&identifier.kind) && !identifier.value.trim().is_empty())
         .map(|identifier| identifier.value.trim())
+}
+
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn normalize_name(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+fn scoped_id(document_id: &str, kind: &str, value: &str) -> String {
+    let digest = hex::encode(Sha256::digest(value.as_bytes()));
+    format!("{document_id}:{kind}:{}", &digest[..16])
+}
+
+fn publication_datetime(draft: &TeiDocument) -> Option<NaiveDateTime> {
+    if let Some(value) = non_empty(draft.bibliography.publication_date.as_deref()) {
+        if let Ok(value) = DateTime::parse_from_rfc3339(value) {
+            return Some(value.naive_utc());
+        }
+        for format in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"] {
+            if let Ok(value) = NaiveDateTime::parse_from_str(value, format) {
+                return Some(value);
+            }
+        }
+        if let Ok(value) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+            return value.and_hms_opt(0, 0, 0);
+        }
+        if let Some((year, month)) = value
+            .split_once('-')
+            .and_then(|(year, month)| Some((year.parse().ok()?, month.parse().ok()?)))
+        {
+            return NaiveDate::from_ymd_opt(year, month, 1)
+                .and_then(|date| date.and_hms_opt(0, 0, 0));
+        }
+        if let Ok(year) = value.parse() {
+            return NaiveDate::from_ymd_opt(year, 1, 1).and_then(|date| date.and_hms_opt(0, 0, 0));
+        }
+    }
+    draft
+        .bibliography
+        .publication_year
+        .and_then(|year| NaiveDate::from_ymd_opt(i32::from(year), 1, 1))
+        .and_then(|date| date.and_hms_opt(0, 0, 0))
 }
 
 #[cfg(test)]
@@ -307,6 +568,67 @@ mod tests {
         assert_eq!(
             canonical.contributors[0].contribution,
             CanonicalContribution::Authorship
+        );
+    }
+
+    #[test]
+    fn canonical_model_contains_the_complete_persistable_graph() {
+        let mut draft = draft(
+            Some("A paper"),
+            vec![
+                id(IdentifierKind::Doi, "10.1234/example"),
+                id(IdentifierKind::Issn, "1234-5678"),
+            ],
+        );
+        draft.bibliography.authors[0].affiliation = Some("Example University".into());
+        draft.bibliography.publisher = Some("Example Press".into());
+        draft.bibliography.journal = Some("Example Journal".into());
+        draft.bibliography.publication_date = Some("2024-05-06".into());
+        draft.bibliography.publication_year = Some(2024);
+
+        let canonical = CanonicalModel::try_from(&draft).unwrap();
+
+        assert_eq!(canonical.organizations.len(), 2);
+        assert_eq!(canonical.affiliations.len(), 1);
+        assert_eq!(canonical.publication_venues.len(), 1);
+        assert_eq!(canonical.publication_events.len(), 1);
+        assert_eq!(
+            canonical.affiliations[0].person_id,
+            canonical.contributors[0].person.person_id
+        );
+        assert_eq!(
+            canonical.affiliations[0].organization_id,
+            canonical.organizations[0].organization_id()
+        );
+        assert_eq!(
+            canonical.publication_events[0].publisher_id.as_deref(),
+            Some(canonical.organizations[1].organization_id())
+        );
+        assert_eq!(canonical.publication_venues[0].issn(), Some("1234-5678"));
+    }
+
+    #[test]
+    fn equal_affiliation_names_share_one_document_scoped_organization() {
+        let mut draft = draft(
+            Some("A paper"),
+            vec![id(IdentifierKind::Doi, "10.1234/example")],
+        );
+        draft.bibliography.authors[0].affiliation = Some(" Example   University ".into());
+        draft.bibliography.authors.push(Contributor {
+            name: "Grace Hopper".into(),
+            forename: Some("Grace".into()),
+            surname: Some("Hopper".into()),
+            affiliation: Some("example university".into()),
+            role: ContributorRole::Author,
+        });
+
+        let canonical = CanonicalModel::try_from(&draft).unwrap();
+
+        assert_eq!(canonical.organizations.len(), 1);
+        assert_eq!(canonical.affiliations.len(), 2);
+        assert_eq!(
+            canonical.affiliations[0].organization_id,
+            canonical.affiliations[1].organization_id
         );
     }
 }

@@ -51,7 +51,7 @@ entity organization,
     owns organization_id @key,
     owns organization_name @card(1),
     owns ror_id @unique,
-    plays contribution:contributor @card(1..),
+    plays contribution:contributor @card(0..),
     plays affiliation:organization,
     plays publication_event:publisher;
 
