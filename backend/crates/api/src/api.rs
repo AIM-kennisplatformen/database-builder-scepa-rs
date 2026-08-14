@@ -6,17 +6,23 @@ use axum::{
     extract::{DefaultBodyLimit, Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
 };
 use scepa::{
+    models::{
+        canonical::CanonicalModel,
+        draft::{DraftDocument, ManualDocument},
+    },
     orchestration::{NewDocumentIngressClient, NewDocumentWorkflowResponse},
     pipeline::{
         PipelineService,
         garage::{GaragePipelineService, StoredPdf, sha256_hex},
+        typedb::{TypeDbService, TypeDbStore},
     },
+    postgres::PostgresReviewStore,
 };
 use serde::Serialize;
-use tower_http::trace::TraceLayer;
+use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 const MAX_PDF_BYTES: usize = 64 * 1024 * 1024;
 
@@ -24,11 +30,23 @@ const MAX_PDF_BYTES: usize = 64 * 1024 * 1024;
 pub struct AppState {
     workflows: NewDocumentIngressClient,
     pdfs: GaragePipelineService,
+    drafts: PostgresReviewStore,
+    typedb: TypeDbService<TypeDbStore>,
 }
 
 impl AppState {
-    pub fn new(workflows: NewDocumentIngressClient, pdfs: GaragePipelineService) -> Self {
-        Self { workflows, pdfs }
+    pub fn new(
+        workflows: NewDocumentIngressClient,
+        pdfs: GaragePipelineService,
+        drafts: PostgresReviewStore,
+        typedb: TypeDbService<TypeDbStore>,
+    ) -> Self {
+        Self {
+            workflows,
+            pdfs,
+            drafts,
+            typedb,
+        }
     }
 }
 
@@ -43,11 +61,24 @@ struct SubmissionResponse {
     workflow_id: String,
 }
 
-struct UploadError(String);
+#[derive(Serialize)]
+struct DraftResponse {
+    pdf_hash: String,
+    #[serde(flatten)]
+    draft: DraftDocument,
+}
 
-impl IntoResponse for UploadError {
+#[derive(Serialize)]
+struct PublishResponse {
+    artifact: DraftResponse,
+    canonical: CanonicalModel,
+}
+
+struct ApiError(StatusCode, String);
+
+impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (StatusCode::BAD_GATEWAY, self.0).into_response()
+        (self.0, self.1).into_response()
     }
 }
 
@@ -56,7 +87,9 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/pdfs", post(upload_pdf))
         .route("/pdfs/submissions/{workflow_id}", post(submit_pdf))
+        .route("/drafts/{pdf_hash}", get(get_draft).put(publish_draft))
         .layer(DefaultBodyLimit::max(MAX_PDF_BYTES))
+        .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -64,14 +97,14 @@ pub fn router(state: AppState) -> Router {
 async fn upload_pdf(
     State(state): State<AppState>,
     pdf: Bytes,
-) -> Result<(StatusCode, Json<UploadResponse>), UploadError> {
+) -> Result<(StatusCode, Json<UploadResponse>), ApiError> {
     let workflow_id = sha256_hex(&pdf);
     let stored = store_pdf(&state, &workflow_id, pdf).await?;
     let result = state
         .workflows
         .run(&workflow_id, stored.pdf_hash)
         .await
-        .map_err(|error| UploadError(error.to_string()))?;
+        .map_err(bad_gateway)?;
 
     Ok((
         StatusCode::CREATED,
@@ -86,9 +119,12 @@ async fn submit_pdf(
     State(state): State<AppState>,
     Path(workflow_id): Path<String>,
     pdf: Bytes,
-) -> Result<(StatusCode, Json<SubmissionResponse>), UploadError> {
+) -> Result<(StatusCode, Json<SubmissionResponse>), ApiError> {
     if workflow_id.is_empty() {
-        return Err(UploadError("workflow identifier must not be empty".into()));
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "workflow identifier must not be empty".into(),
+        ));
     }
 
     let stored = store_pdf(&state, &workflow_id, pdf).await?;
@@ -96,7 +132,7 @@ async fn submit_pdf(
         .workflows
         .submit(&workflow_id, stored.pdf_hash)
         .await
-        .map_err(|error| UploadError(error.to_string()))?;
+        .map_err(bad_gateway)?;
 
     Ok((
         StatusCode::ACCEPTED,
@@ -104,15 +140,70 @@ async fn submit_pdf(
     ))
 }
 
-async fn store_pdf(
-    state: &AppState,
-    workflow_id: &str,
-    pdf: Bytes,
-) -> Result<StoredPdf, UploadError> {
+async fn store_pdf(state: &AppState, workflow_id: &str, pdf: Bytes) -> Result<StoredPdf, ApiError> {
     state
         .pdfs
         .execute(workflow_id, &pdf.to_vec())
         .await
         .map(|outcome| outcome.into_output(|_| {}))
-        .map_err(|error| UploadError(error.to_string()))
+        .map_err(bad_gateway)
+}
+
+async fn get_draft(
+    State(state): State<AppState>,
+    Path(pdf_hash): Path<String>,
+) -> Result<Json<DraftResponse>, ApiError> {
+    let draft = state
+        .drafts
+        .get_draft_document(&pdf_hash)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "document draft not found".into()))?;
+
+    Ok(Json(DraftResponse { pdf_hash, draft }))
+}
+
+async fn publish_draft(
+    State(state): State<AppState>,
+    Path(pdf_hash): Path<String>,
+    Json(manual_data): Json<ManualDocument>,
+) -> Result<Json<PublishResponse>, ApiError> {
+    if !state
+        .drafts
+        .store_manual_data(&pdf_hash, &manual_data)
+        .await
+        .map_err(internal)?
+    {
+        return Err(ApiError(
+            StatusCode::NOT_FOUND,
+            "document draft not found".into(),
+        ));
+    }
+
+    let draft = state
+        .drafts
+        .get_draft_document(&pdf_hash)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "document draft not found".into()))?;
+    let effective = draft.effective_document();
+    let canonical = state
+        .typedb
+        .pre_validate_with_pdf_hash(&effective, &pdf_hash)
+        .await
+        .map_err(|error| ApiError(StatusCode::UNPROCESSABLE_ENTITY, error.to_string()))?;
+    state.typedb.execute(&canonical).await.map_err(internal)?;
+
+    Ok(Json(PublishResponse {
+        artifact: DraftResponse { pdf_hash, draft },
+        canonical,
+    }))
+}
+
+fn bad_gateway(error: impl std::fmt::Display) -> ApiError {
+    ApiError(StatusCode::BAD_GATEWAY, error.to_string())
+}
+
+fn internal(error: impl std::fmt::Display) -> ApiError {
+    ApiError(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
 }

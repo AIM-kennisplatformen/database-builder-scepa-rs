@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use serde::Serialize;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 
-use crate::models::draft::TeiDocument;
+use crate::models::draft::{DraftDocument, ManualDocument};
 use crate::pipeline::{
     FailureDisposition, FailureRecord, ReviewStore, document::DocumentArtifactStore,
 };
@@ -133,8 +133,13 @@ impl PostgresReviewStore {
     pub async fn store_draft_artifact(
         &self,
         pdf_hash: &str,
-        draft: &TeiDocument,
+        draft: &DraftDocument,
     ) -> eros::Result<()> {
+        let mut artifact = serde_json::to_value(draft)?;
+        artifact
+            .as_object_mut()
+            .expect("DraftDocument serializes as a JSON object")
+            .insert("pdf_hash".into(), pdf_hash.into());
         sqlx::query(
             r#"
             INSERT INTO document_artifacts (pdf_hash, draft_artifact)
@@ -144,10 +149,52 @@ impl PostgresReviewStore {
             "#,
         )
         .bind(pdf_hash)
-        .bind(serde_json::to_value(draft)?)
+        .bind(artifact)
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// Loads the typed review draft without discarding its extraction data.
+    pub async fn get_draft_document(&self, pdf_hash: &str) -> eros::Result<Option<DraftDocument>> {
+        let artifact: Option<serde_json::Value> =
+            sqlx::query_scalar("SELECT draft_artifact FROM document_artifacts WHERE pdf_hash = $1")
+                .bind(pdf_hash)
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten();
+
+        artifact
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(Into::into)
+    }
+
+    /// Replaces only the operator-authored layer of an existing draft.
+    pub async fn store_manual_data(
+        &self,
+        pdf_hash: &str,
+        manual_data: &ManualDocument,
+    ) -> eros::Result<bool> {
+        let result = sqlx::query(
+            r#"
+            UPDATE document_artifacts
+            SET draft_artifact = jsonb_set(
+                    draft_artifact,
+                    '{manual_data}',
+                    $2::jsonb,
+                    true
+                ),
+                updated_at = now()
+            WHERE pdf_hash = $1 AND draft_artifact IS NOT NULL
+            "#,
+        )
+        .bind(pdf_hash)
+        .bind(serde_json::to_value(manual_data)?)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() == 1)
     }
 
     /// Loads all representations currently available for one document.
@@ -365,7 +412,11 @@ impl DocumentArtifactStore for PostgresReviewStore {
         PostgresReviewStore::store_tei_xml(self, pdf_hash, tei_xml).await
     }
 
-    async fn store_draft_artifact(&self, pdf_hash: &str, draft: &TeiDocument) -> eros::Result<()> {
+    async fn store_draft_artifact(
+        &self,
+        pdf_hash: &str,
+        draft: &DraftDocument,
+    ) -> eros::Result<()> {
         PostgresReviewStore::store_draft_artifact(self, pdf_hash, draft).await
     }
 }

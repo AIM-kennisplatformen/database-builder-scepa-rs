@@ -5,11 +5,10 @@ use serde::{Deserialize, Serialize};
 
 use super::super::restate::{
     DocumentRestateServiceClient, GarageRestateServiceClient, LinkWorkflowPdfRequest,
-    PipelineExecuteRequest, PipelineExecuteResponse, TypeDbExecuteRequest,
-    TypeDbRestateServiceClient,
+    PipelineExecuteRequest, PipelineExecuteResponse,
 };
 use crate::{
-    models::{canonical::CanonicalModel, draft::TeiDocument},
+    models::draft::{DraftDocument, TeiDocument},
     pipeline::{DocumentPipelineWarning, garage::StoredPdf},
 };
 
@@ -23,8 +22,7 @@ pub struct NewDocumentWorkflowRequest {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NewDocumentWorkflowResponse {
     pub stored_pdf: StoredPdf,
-    pub document: TeiDocument,
-    pub canonical: CanonicalModel,
+    pub draft: DraftDocument,
     pub warnings: Vec<DocumentPipelineWarning>,
 }
 
@@ -114,20 +112,9 @@ impl NewDocumentWorkflow {
             .await?
             .into_inner();
 
-        let canonical = ctx
-            .service_client::<TypeDbRestateServiceClient>()
-            .execute(Json(TypeDbExecuteRequest {
-                pdf_hash: stored.pdf_hash.clone(),
-                document: extracted.output.clone(),
-            }))
-            .call()
-            .await?
-            .into_inner();
-
         Ok(Json(NewDocumentWorkflowResponse {
             stored_pdf: stored,
-            document: extracted.output,
-            canonical,
+            draft: DraftDocument::new(extracted.output),
             warnings: extracted.warnings,
         }))
     }

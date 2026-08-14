@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     );
     let document_pipeline = DocumentPipelineService::new(
         HttpGrobidClient::new(http_client.clone(), required("GROBID_URL")?),
-        review_store,
+        review_store.clone(),
     );
     let typedb = TypeDbService::connect(
         &required("TYPEDB_ADDRESS")?,
@@ -77,7 +77,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             document_pipeline,
             garage_pipeline.clone(),
         ))
-        .bind(TypeDbRestateService::new(typedb))
+        .bind(TypeDbRestateService::new(typedb.clone()))
         .bind(DocumentExtractionWorkflow)
         .bind(NewDocumentWorkflow)
         .build();
@@ -90,6 +90,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let state = api::AppState::new(
         NewDocumentIngressClient::new(&restate_ingress_url)?,
         garage_pipeline,
+        review_store,
+        typedb,
     );
     tracing::info!(
         %api_address,
