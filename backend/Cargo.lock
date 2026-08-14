@@ -2896,7 +2896,6 @@ dependencies = [
  "clap",
  "reqwest",
  "scepa",
- "serde_json",
  "tokio",
 ]
 

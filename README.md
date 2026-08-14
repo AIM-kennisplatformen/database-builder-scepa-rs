@@ -131,40 +131,19 @@ The health endpoint is `GET /healthz`.
 
 ## Pipeline CLI
 
-The CLI exposes pipeline commands. With the Compose services running, use the
-same `DATABASE_URL`, `GROBID_URL`, and `RESTATE_INGRESS_URL` environment
-variables as the server.
-
-Run the composite Grobid extraction and TEI parser against an existing review
-artifact:
+The CLI exposes exactly two pipeline commands. With the Compose services
+running, use the same `DATABASE_URL` and `RESTATE_INGRESS_URL` environment
+variables as the server. Workflow identifiers are derived from file stems:
 
 ```bash
-scepa-cli pipeline grobid input-validation 42
-scepa-cli pipeline grobid output-validation 42
-scepa-cli pipeline grobid execute 42
-```
-
-The identifier is a `review_cases.id`. Input validation and execute require a
-PDF artifact; output validation requires a JSON `TeiDocument` artifact.
-
-Submit one PDF or a directory of PDFs to Restate. Workflow identifiers are
-derived from file stems:
-
-```bash
-scepa-cli pipeline run paper.pdf
-scepa-cli pipeline run batch ./papers
+scepa-cli single paper.pdf
+scepa-cli batch ./papers
 ```
 
 Use `--identifier` to rerun a PDF under a fresh Restate workflow key:
 
 ```bash
-scepa-cli pipeline run --identifier 2AEJBJL6-debug .sources/pdfs/2AEJBJL6.pdf
-```
-
-Repair the artifact belonging to a pending validation failure:
-
-```bash
-scepa-cli artifact patch 42 corrected.pdf --content-type application/pdf
+scepa-cli single --identifier 2AEJBJL6-debug .sources/pdfs/2AEJBJL6.pdf
 ```
 
 The `scepa-api` binary only runs the HTTP and Restate endpoints; all command-line
