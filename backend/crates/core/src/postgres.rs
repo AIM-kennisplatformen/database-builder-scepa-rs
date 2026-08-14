@@ -343,6 +343,36 @@ impl PostgresReviewStore {
         .await?)
     }
 
+    /// Lists every document failure that is still waiting to be fixed.
+    ///
+    /// Unlike the paginated operator queue, this intentionally has no limit:
+    /// it backs the document picker and must not silently omit older failures.
+    pub async fn list_documents_requiring_fixing(&self) -> eros::Result<Vec<ReviewCase>> {
+        Ok(sqlx::query_as::<_, ReviewCase>(
+            r#"
+            SELECT
+                id,
+                workflow_id,
+                pdf_hash,
+                service,
+                phase,
+                retryable,
+                error_message,
+                artifact_content_type,
+                octet_length(artifact_bytes) AS artifact_size,
+                status,
+                resolution,
+                created_at::text AS created_at,
+                resolved_at::text AS resolved_at
+            FROM review_cases
+            WHERE status = 'pending'
+            ORDER BY created_at DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// Counts review cases that are waiting for an operator decision.
     pub async fn count_pending_cases(&self) -> eros::Result<i64> {
         Ok(

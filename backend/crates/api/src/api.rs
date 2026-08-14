@@ -97,6 +97,10 @@ pub fn router(state: AppState) -> Router {
         .route("/drafts/{pdf_hash}", get(get_draft).put(publish_draft))
         .route("/documents", get(list_documents))
         .route(
+            "/documents/requiring-fixing",
+            get(list_documents_requiring_fixing),
+        )
+        .route(
             "/documents/{pdf_hash}",
             get(get_published_document).put(update_document),
         )
@@ -261,6 +265,18 @@ async fn list_documents(
         state
             .drafts
             .list_published_documents()
+            .await
+            .map_err(internal)?,
+    ))
+}
+
+async fn list_documents_requiring_fixing(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<scepa::postgres::ReviewCase>>, ApiError> {
+    Ok(Json(
+        state
+            .drafts
+            .list_documents_requiring_fixing()
             .await
             .map_err(internal)?,
     ))

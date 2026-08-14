@@ -5,10 +5,14 @@ use serde::{Deserialize, Serialize};
 
 use super::super::restate::{
     DocumentRestateServiceClient, GarageRestateServiceClient, LinkWorkflowPdfRequest,
-    PipelineExecuteRequest, PipelineExecuteResponse,
+    PipelineExecuteRequest, PipelineExecuteResponse, PublishedArtifactRestateServiceClient,
+    StorePublishedArtifactRequest, TypeDbExecuteRequest, TypeDbRestateServiceClient,
 };
 use crate::{
-    models::draft::{DraftDocument, TeiDocument},
+    models::{
+        canonical::CanonicalModel,
+        draft::{DraftDocument, TeiDocument},
+    },
     pipeline::{DocumentPipelineWarning, garage::StoredPdf},
 };
 
@@ -23,6 +27,7 @@ pub struct NewDocumentWorkflowRequest {
 pub struct NewDocumentWorkflowResponse {
     pub stored_pdf: StoredPdf,
     pub draft: DraftDocument,
+    pub canonical: CanonicalModel,
     pub warnings: Vec<DocumentPipelineWarning>,
 }
 
@@ -112,9 +117,29 @@ impl NewDocumentWorkflow {
             .await?
             .into_inner();
 
+        let draft = DraftDocument::new(extracted.output);
+        let canonical = ctx
+            .service_client::<TypeDbRestateServiceClient>()
+            .execute(Json(TypeDbExecuteRequest {
+                pdf_hash: stored.pdf_hash.clone(),
+                document: draft.effective_document(),
+            }))
+            .call()
+            .await?
+            .into_inner();
+
+        ctx.service_client::<PublishedArtifactRestateServiceClient>()
+            .store_published(Json(StorePublishedArtifactRequest {
+                pdf_hash: stored.pdf_hash.clone(),
+                artifact: draft.clone(),
+            }))
+            .call()
+            .await?;
+
         Ok(Json(NewDocumentWorkflowResponse {
             stored_pdf: stored,
-            draft: DraftDocument::new(extracted.output),
+            draft,
+            canonical,
             warnings: extracted.warnings,
         }))
     }

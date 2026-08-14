@@ -76,6 +76,7 @@ type UploadResult = {
   result: {
     stored_pdf: { pdf_hash: string; size_bytes: number };
     draft: Draft;
+    canonical: unknown;
     warnings: unknown[];
   };
 };
@@ -153,9 +154,9 @@ function UploadPanel({ onSelect, busy, error }: { onSelect: (file: File) => void
   const accept = (files: FileList | null) => files?.[0] && onSelect(files[0]);
   const drop = (event: DragEvent) => { event.preventDefault(); setDragging(false); accept(event.dataTransfer.files); };
   return <div className="stage-card upload-stage">
-    <div className="eyebrow"><Glyph name="sparkle" size={15}/> NEW DOCUMENT · MANUAL</div>
+    <div className="eyebrow"><Glyph name="sparkle" size={15}/> NEW DOCUMENT · AUTOMATIC</div>
     <h1>Start with the source document</h1>
-    <p className="lede">Upload a PDF. SCEPA runs the automatic extraction pipeline first, then opens a review workspace before anything enters the canonical graph.</p>
+    <p className="lede">Upload a PDF. SCEPA validates and publishes successful extractions automatically; failed documents are retained for review.</p>
     <label className={`dropzone ${dragging ? "dragging" : ""} ${busy ? "busy" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={drop}>
       <input type="file" accept="application/pdf,.pdf" disabled={busy} onChange={(e) => accept(e.target.files)}/>
       <span className="upload-icon">{busy ? <span className="spinner"/> : <Glyph name="upload" size={28}/>}</span>
@@ -164,7 +165,7 @@ function UploadPanel({ onSelect, busy, error }: { onSelect: (file: File) => void
       {!busy && <span className="browse">Choose PDF</span>}
     </label>
     {error && <div className="error-box">{error}</div>}
-    <div className="pipeline-hint"><span><i>1</i> Store source</span><Glyph name="arrow" size={15}/><span><i>2</i> Grobid extraction</span><Glyph name="arrow" size={15}/><span><i>3</i> Manual review</span></div>
+    <div className="pipeline-hint"><span><i>1</i> Store source</span><Glyph name="arrow" size={15}/><span><i>2</i> Extract &amp; validate</span><Glyph name="arrow" size={15}/><span><i>3</i> Publish graph</span></div>
   </div>;
 }
 
@@ -458,7 +459,7 @@ export default function App() {
       const response = await fetch(`${API}/pdfs`, { method: "POST", headers: { "content-type": "application/pdf" }, body: selected });
       if (!response.ok) throw new Error((await response.text()) || `Ingestion failed (${response.status})`);
       const payload: UploadResult = await response.json();
-      setDraft(payload.result.draft); setHash(payload.result.stored_pdf.pdf_hash); setStage("review");
+      setHash(payload.result.stored_pdf.pdf_hash); setCanonical(payload.result.canonical); setStage("complete");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "The ingestion pipeline failed."); }
     finally { setBusy(false); }
   };
