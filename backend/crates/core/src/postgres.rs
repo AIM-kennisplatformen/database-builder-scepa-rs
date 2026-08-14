@@ -4,7 +4,20 @@ use async_trait::async_trait;
 use serde::Serialize;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 
-use crate::pipeline::{FailureDisposition, FailureRecord, ReviewStore};
+use crate::models::draft::TeiDocument;
+use crate::pipeline::{
+    FailureDisposition, FailureRecord, ReviewStore, document::DocumentArtifactStore,
+};
+
+/// Data retained for every document as soon as each representation exists.
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct DocumentArtifacts {
+    pub pdf_hash: String,
+    pub tei_xml: Option<String>,
+    pub draft_artifact: Option<serde_json::Value>,
+    pub created_at: String,
+    pub updated_at: String,
+}
 
 /// A durable, idempotent [`ReviewStore`] backed by PostgreSQL.
 ///
@@ -58,6 +71,101 @@ impl PostgresReviewStore {
     pub async fn migrate(&self) -> eros::Result<()> {
         sqlx::migrate!().run(&self.pool).await?;
         Ok(())
+    }
+
+    /// Persists a content hash and its workflow association before processing.
+    pub async fn store_pdf_hash(&self, workflow_id: &str, pdf_hash: &str) -> eros::Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO document_artifacts (pdf_hash) VALUES ($1)
+            ON CONFLICT (pdf_hash) DO NOTHING
+            "#,
+        )
+        .bind(pdf_hash)
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO workflow_pdfs (workflow_id, pdf_hash) VALUES ($1, $2)
+            ON CONFLICT (workflow_id) DO NOTHING
+            "#,
+        )
+        .bind(workflow_id)
+        .bind(pdf_hash)
+        .execute(&self.pool)
+        .await?;
+
+        let linked_hash: String =
+            sqlx::query_scalar("SELECT pdf_hash FROM workflow_pdfs WHERE workflow_id = $1")
+                .bind(workflow_id)
+                .fetch_one(&self.pool)
+                .await?;
+        if linked_hash != pdf_hash {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!("workflow {workflow_id} is already linked to PDF {linked_hash}"),
+            )
+            .into());
+        }
+
+        Ok(())
+    }
+
+    /// Persists raw TEI immediately after extraction.
+    pub async fn store_tei_xml(&self, pdf_hash: &str, tei_xml: &str) -> eros::Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO document_artifacts (pdf_hash, tei_xml)
+            VALUES ($1, $2)
+            ON CONFLICT (pdf_hash) DO UPDATE
+            SET tei_xml = EXCLUDED.tei_xml, updated_at = now()
+            "#,
+        )
+        .bind(pdf_hash)
+        .bind(tei_xml)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Persists the converted draft immediately after conversion.
+    pub async fn store_draft_artifact(
+        &self,
+        pdf_hash: &str,
+        draft: &TeiDocument,
+    ) -> eros::Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO document_artifacts (pdf_hash, draft_artifact)
+            VALUES ($1, $2)
+            ON CONFLICT (pdf_hash) DO UPDATE
+            SET draft_artifact = EXCLUDED.draft_artifact, updated_at = now()
+            "#,
+        )
+        .bind(pdf_hash)
+        .bind(serde_json::to_value(draft)?)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Loads all representations currently available for one document.
+    pub async fn get_document_artifacts(
+        &self,
+        pdf_hash: &str,
+    ) -> eros::Result<Option<DocumentArtifacts>> {
+        Ok(sqlx::query_as(
+            r#"
+            SELECT pdf_hash, tei_xml, draft_artifact,
+                   created_at::text AS created_at, updated_at::text AS updated_at
+            FROM document_artifacts
+            WHERE pdf_hash = $1
+            "#,
+        )
+        .bind(pdf_hash)
+        .fetch_optional(&self.pool)
+        .await?)
     }
 
     /// Lists review cases, optionally filtered by status.
@@ -248,5 +356,16 @@ impl ReviewStore for PostgresReviewStore {
         .await?;
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl DocumentArtifactStore for PostgresReviewStore {
+    async fn store_tei_xml(&self, pdf_hash: &str, tei_xml: &str) -> eros::Result<()> {
+        PostgresReviewStore::store_tei_xml(self, pdf_hash, tei_xml).await
+    }
+
+    async fn store_draft_artifact(&self, pdf_hash: &str, draft: &TeiDocument) -> eros::Result<()> {
+        PostgresReviewStore::store_draft_artifact(self, pdf_hash, draft).await
     }
 }

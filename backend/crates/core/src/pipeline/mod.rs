@@ -288,6 +288,14 @@ pub trait PipelineService: Send + Sync {
         FailureDisposition::Terminal
     }
 
+    /// Durably records input-derived data before validation or processing.
+    ///
+    /// Persistence failures are retryable so an orchestrator cannot continue
+    /// until data that already exists has crossed its durability boundary.
+    async fn persist_input(&self, _workflow_id: &str, _input: &Self::Input) -> eros::Result<()> {
+        Ok(())
+    }
+
     /// Validates `input` before processing.
     ///
     /// Returning `Err` prevents [`PipelineService::process`] from running.
@@ -342,6 +350,13 @@ pub trait PipelineService: Send + Sync {
         workflow_id: &str,
         input: &Self::Input,
     ) -> Result<PipelineOutcome<Self::Output, Self::Warning>, PipelineExecutionError> {
+        if let Err(error) = self.persist_input(workflow_id, input).await {
+            return Err(PipelineExecutionError {
+                disposition: FailureDisposition::Retryable,
+                source: error,
+            });
+        }
+
         let mut report = match self.validate_input(input).await {
             Ok(report) => report,
 
@@ -438,7 +453,7 @@ pub trait PipelineService: Send + Sync {
         let artifact = self.review_artifact(input, output);
 
         let error_message = error.to_string();
-        let disposition = self.failure_disposition(phase, &error);
+        let disposition = self.failure_disposition(phase, error);
 
         self.review_store()
             .stage(FailureRecord {

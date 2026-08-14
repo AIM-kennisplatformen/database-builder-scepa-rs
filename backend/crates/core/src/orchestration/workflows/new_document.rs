@@ -16,7 +16,7 @@ use crate::{
 /// Input for a complete document-ingestion workflow.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NewDocumentWorkflowRequest {
-    pub pdf: Vec<u8>,
+    pub pdf_hash: String,
 }
 
 /// Result of a complete document-ingestion workflow.
@@ -32,7 +32,7 @@ pub struct NewDocumentWorkflowResponse {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DocumentExtractionWorkflowRequest {
     pub workflow_id: String,
-    pub pdf: Vec<u8>,
+    pub pdf_hash: String,
 }
 
 /// Parsed document and non-fatal findings produced by extraction.
@@ -56,7 +56,7 @@ impl DocumentExtractionWorkflow {
             .service_client::<DocumentRestateServiceClient>()
             .execute(Json(PipelineExecuteRequest::new(
                 request.workflow_id,
-                request.pdf,
+                request.pdf_hash,
             )))
             .call()
             .await?
@@ -83,25 +83,21 @@ impl NewDocumentWorkflow {
         let workflow_id = ctx.key().to_owned();
         let request = request.into_inner();
 
-        // Garage uploads the object and upserts its immutable metadata before
-        // its execute handler returns.
+        // The caller stores the PDF before invoking this workflow. Keep only
+        // its content address in Restate's journal and resolve bytes at the
+        // component that actually consumes them.
         let stored = ctx
             .service_client::<GarageRestateServiceClient>()
-            .execute(Json(PipelineExecuteRequest::new(
-                workflow_id.clone(),
-                request.pdf.clone(),
-            )))
+            .get_pdf(Json(request.pdf_hash.clone()))
             .call()
             .await?
-            .into_inner()
-            .output;
+            .into_inner();
 
-        // Keep this as a separate durable call so extraction cannot start
-        // until the workflow-to-hash association exists in PostgreSQL.
+        // Persist the workflow association before extraction can start.
         ctx.service_client::<GarageRestateServiceClient>()
             .link_workflow(Json(LinkWorkflowPdfRequest {
                 workflow_id: workflow_id.clone(),
-                pdf_hash: stored.pdf_hash.clone(),
+                pdf_hash: request.pdf_hash.clone(),
             }))
             .call()
             .await?;
@@ -112,7 +108,7 @@ impl NewDocumentWorkflow {
             ))
             .run(Json(DocumentExtractionWorkflowRequest {
                 workflow_id: workflow_id.clone(),
-                pdf: request.pdf,
+                pdf_hash: request.pdf_hash,
             }))
             .call()
             .await?
@@ -134,5 +130,34 @@ impl NewDocumentWorkflow {
             canonical,
             warnings: extracted.warnings,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workflow_requests_contain_references_instead_of_pdf_bytes() {
+        let hash = "a".repeat(64);
+
+        assert_eq!(
+            serde_json::to_value(NewDocumentWorkflowRequest {
+                pdf_hash: hash.clone(),
+            })
+            .unwrap(),
+            serde_json::json!({ "pdf_hash": hash })
+        );
+        assert_eq!(
+            serde_json::to_value(DocumentExtractionWorkflowRequest {
+                workflow_id: "paper-1".into(),
+                pdf_hash: "b".repeat(64),
+            })
+            .unwrap(),
+            serde_json::json!({
+                "workflow_id": "paper-1",
+                "pdf_hash": "b".repeat(64),
+            })
+        );
     }
 }

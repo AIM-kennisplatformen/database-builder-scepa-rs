@@ -38,6 +38,16 @@ impl PostgresPdfStore {
     }
 
     pub async fn upsert(&self, pdf: &StoredPdf) -> eros::Result<StoredPdf> {
+        sqlx::query(
+            r#"
+            INSERT INTO document_artifacts (pdf_hash) VALUES ($1)
+            ON CONFLICT (pdf_hash) DO NOTHING
+            "#,
+        )
+        .bind(&pdf.pdf_hash)
+        .execute(&self.pool)
+        .await?;
+
         Ok(sqlx::query_as(
             r#"
             INSERT INTO pdf_files (pdf_hash, bucket, object_key, content_type, size_bytes)
@@ -334,6 +344,12 @@ impl PipelineService for GaragePipelineService {
                 FailureDisposition::Terminal
             }
         }
+    }
+
+    async fn persist_input(&self, workflow_id: &str, bytes: &Self::Input) -> eros::Result<()> {
+        self.review_store
+            .store_pdf_hash(workflow_id, &sha256_hex(bytes))
+            .await
     }
 
     async fn validate_input(

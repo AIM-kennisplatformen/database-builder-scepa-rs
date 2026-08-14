@@ -8,9 +8,17 @@ use serde::{Deserialize, Serialize};
 use super::{
     FailureDisposition, PipelinePhase, PipelineService, ReviewArtifact, ReviewStore,
     ValidationReport,
+    garage::sha256_hex,
     grobid::{GrobidClient, GrobidExtractionService, GrobidValidationWarning},
     tei::{TeiConversionService, TeiDocument, TeiValidationWarning},
 };
+
+/// PostgreSQL-facing durability boundary for extracted document data.
+#[async_trait]
+pub trait DocumentArtifactStore: Send + Sync {
+    async fn store_tei_xml(&self, pdf_hash: &str, tei_xml: &str) -> eros::Result<()>;
+    async fn store_draft_artifact(&self, pdf_hash: &str, draft: &TeiDocument) -> eros::Result<()>;
+}
 
 /// Warning emitted by either stage of the composite document pipeline.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -66,9 +74,11 @@ impl DocumentPipelineOutput {
 #[derive(Clone, Copy, Debug)]
 enum DocumentProcessingStage {
     GrobidProcessing,
+    TeiPersistence,
     GrobidOutputValidation,
     TeiInputValidation,
     TeiConversion,
+    DraftPersistence,
 }
 
 #[derive(Debug)]
@@ -110,7 +120,7 @@ where
 impl<C, S> PipelineService for DocumentPipelineService<C, S>
 where
     C: GrobidClient,
-    S: ReviewStore + Clone,
+    S: DocumentArtifactStore + ReviewStore + Clone,
 {
     type Input = Vec<u8>;
     type Output = DocumentPipelineOutput;
@@ -151,6 +161,7 @@ where
     }
 
     async fn process(&self, pdf: &Self::Input) -> eros::Result<Self::Output> {
+        let pdf_hash = sha256_hex(pdf);
         let tei = match self.grobid.process(pdf).await {
             Ok(tei) => tei,
             Err(error) => {
@@ -164,6 +175,17 @@ where
                 ));
             }
         };
+
+        self.review_store
+            .store_tei_xml(&pdf_hash, &tei)
+            .await
+            .map_err(|error| {
+                document_error(
+                    DocumentProcessingStage::TeiPersistence,
+                    FailureDisposition::Retryable,
+                    error,
+                )
+            })?;
 
         let grobid_report = self.grobid.validate_output(&tei).await.map_err(|error| {
             document_error(
@@ -188,6 +210,17 @@ where
                 error,
             )
         })?;
+
+        self.review_store
+            .store_draft_artifact(&pdf_hash, &document)
+            .await
+            .map_err(|error| {
+                document_error(
+                    DocumentProcessingStage::DraftPersistence,
+                    FailureDisposition::Retryable,
+                    error,
+                )
+            })?;
 
         tracing::debug!(
             tei_bytes = tei.len(),
@@ -262,12 +295,39 @@ mod tests {
     use crate::pipeline::FailureRecord;
 
     #[derive(Clone, Default)]
-    struct RecordingStore(Arc<Mutex<Vec<FailureRecord>>>);
+    struct RecordingStore {
+        failures: Arc<Mutex<Vec<FailureRecord>>>,
+        teis: Arc<Mutex<Vec<(String, String)>>>,
+        drafts: Arc<Mutex<Vec<(String, TeiDocument)>>>,
+    }
 
     #[async_trait]
     impl ReviewStore for RecordingStore {
         async fn stage(&self, failure: FailureRecord) -> eros::Result<()> {
-            self.0.lock().unwrap().push(failure);
+            self.failures.lock().unwrap().push(failure);
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl DocumentArtifactStore for RecordingStore {
+        async fn store_tei_xml(&self, pdf_hash: &str, tei_xml: &str) -> eros::Result<()> {
+            self.teis
+                .lock()
+                .unwrap()
+                .push((pdf_hash.to_owned(), tei_xml.to_owned()));
+            Ok(())
+        }
+
+        async fn store_draft_artifact(
+            &self,
+            pdf_hash: &str,
+            draft: &TeiDocument,
+        ) -> eros::Result<()> {
+            self.drafts
+                .lock()
+                .unwrap()
+                .push((pdf_hash.to_owned(), draft.clone()));
             Ok(())
         }
     }
@@ -278,6 +338,24 @@ mod tests {
     impl GrobidClient for FailingClient {
         async fn extract_tei(&self, _pdf: &[u8]) -> eros::Result<String> {
             Err(std::io::Error::other("invalid local Grobid response").into())
+        }
+    }
+
+    struct InvalidTeiClient;
+
+    #[async_trait]
+    impl GrobidClient for InvalidTeiClient {
+        async fn extract_tei(&self, _pdf: &[u8]) -> eros::Result<String> {
+            Ok("<invalid/>".into())
+        }
+    }
+
+    struct ValidTeiClient;
+
+    #[async_trait]
+    impl GrobidClient for ValidTeiClient {
+        async fn extract_tei(&self, _pdf: &[u8]) -> eros::Result<String> {
+            Ok(r#"<TEI><teiHeader><fileDesc><titleStmt><title>Stored</title></titleStmt><publicationStmt><p/></publicationStmt><sourceDesc><p/></sourceDesc></fileDesc></teiHeader><text><body><p>Body</p></body></text></TEI>"#.into())
         }
     }
 
@@ -321,10 +399,35 @@ mod tests {
                 .is_err()
         );
 
-        let failures = store.0.lock().unwrap();
+        let failures = store.failures.lock().unwrap();
         assert_eq!(failures.len(), 1);
         assert_eq!(failures[0].service, "document-pipeline");
         assert_eq!(failures[0].phase, PipelinePhase::Processing);
         assert_eq!(failures[0].disposition, FailureDisposition::Terminal);
+    }
+
+    #[tokio::test]
+    async fn tei_is_persisted_before_later_validation_can_fail() {
+        let store = RecordingStore::default();
+        let service = DocumentPipelineService::new(InvalidTeiClient, store.clone());
+        let pdf = b"pdf".to_vec();
+
+        assert!(service.execute("workflow-1", &pdf).await.is_err());
+
+        let teis = store.teis.lock().unwrap();
+        assert_eq!(teis.as_slice(), &[(sha256_hex(&pdf), "<invalid/>".into())]);
+        assert!(store.drafts.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn successful_extraction_persists_tei_and_draft() {
+        let store = RecordingStore::default();
+        let service = DocumentPipelineService::new(ValidTeiClient, store.clone());
+        let pdf = b"pdf".to_vec();
+
+        let _ = service.execute("workflow-1", &pdf).await.unwrap();
+
+        assert_eq!(store.teis.lock().unwrap().len(), 1);
+        assert_eq!(store.drafts.lock().unwrap().len(), 1);
     }
 }

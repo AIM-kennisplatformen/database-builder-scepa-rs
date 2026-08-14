@@ -63,11 +63,15 @@ impl<O, W> From<PipelineOutcome<O, W>> for PipelineExecuteResponse<O, W> {
 /// Restate endpoint for Grobid extraction.
 pub struct GrobidRestateService {
     pipeline: GrobidExtractionService<HttpGrobidClient, PostgresReviewStore>,
+    pdfs: GaragePipelineService,
 }
 
 impl GrobidRestateService {
-    pub fn new(pipeline: GrobidExtractionService<HttpGrobidClient, PostgresReviewStore>) -> Self {
-        Self { pipeline }
+    pub fn new(
+        pipeline: GrobidExtractionService<HttpGrobidClient, PostgresReviewStore>,
+        pdfs: GaragePipelineService,
+    ) -> Self {
+        Self { pipeline, pdfs }
     }
 }
 
@@ -77,12 +81,17 @@ impl GrobidRestateService {
     async fn execute(
         &self,
         _ctx: Context<'_>,
-        request: Json<PipelineExecuteRequest<Vec<u8>>>,
+        request: Json<PipelineExecuteRequest<String>>,
     ) -> HandlerResult<Json<PipelineExecuteResponse<String, GrobidValidationWarning>>> {
-        execute_pipeline(&self.pipeline, request.into_inner())
-            .await
-            .map(PipelineExecuteResponse::from)
-            .map(Json::from)
+        let request = request.into_inner();
+        let (_, pdf) = load_pdf(&self.pdfs, &request.input).await?;
+        execute_pipeline(
+            &self.pipeline,
+            PipelineExecuteRequest::new(request.workflow_id, pdf),
+        )
+        .await
+        .map(PipelineExecuteResponse::from)
+        .map(Json::from)
     }
 }
 
@@ -115,11 +124,15 @@ impl TeiRestateService {
 /// Restate endpoint for the composite PDF-to-document pipeline.
 pub struct DocumentRestateService {
     pipeline: DocumentPipelineService<HttpGrobidClient, PostgresReviewStore>,
+    pdfs: GaragePipelineService,
 }
 
 impl DocumentRestateService {
-    pub fn new(pipeline: DocumentPipelineService<HttpGrobidClient, PostgresReviewStore>) -> Self {
-        Self { pipeline }
+    pub fn new(
+        pipeline: DocumentPipelineService<HttpGrobidClient, PostgresReviewStore>,
+        pdfs: GaragePipelineService,
+    ) -> Self {
+        Self { pipeline, pdfs }
     }
 }
 
@@ -129,13 +142,19 @@ impl DocumentRestateService {
     async fn execute(
         &self,
         _ctx: Context<'_>,
-        request: Json<PipelineExecuteRequest<Vec<u8>>>,
+        request: Json<PipelineExecuteRequest<String>>,
     ) -> HandlerResult<Json<PipelineExecuteResponse<DocumentPipelineOutput, DocumentPipelineWarning>>>
     {
-        execute_pipeline(&self.pipeline, request.into_inner())
-            .await
-            .map(PipelineExecuteResponse::from)
-            .map(Json::from)
+        let request = request.into_inner();
+        let (_, pdf) = load_pdf(&self.pdfs, &request.input).await?;
+
+        execute_pipeline(
+            &self.pipeline,
+            PipelineExecuteRequest::new(request.workflow_id, pdf),
+        )
+        .await
+        .map(PipelineExecuteResponse::from)
+        .map(Json::from)
     }
 }
 
@@ -152,18 +171,6 @@ impl GarageRestateService {
 
 #[restate_sdk::service(name = "GaragePipeline")]
 impl GarageRestateService {
-    #[restate_sdk::handler]
-    async fn execute(
-        &self,
-        _ctx: Context<'_>,
-        request: Json<PipelineExecuteRequest<Vec<u8>>>,
-    ) -> HandlerResult<Json<PipelineExecuteResponse<StoredPdf, String>>> {
-        let outcome = execute_pipeline(&self.pipeline, request.into_inner()).await?;
-        let (output, warnings) = outcome.into_parts();
-        let warnings = warnings.into_iter().map(|never| match never {}).collect();
-        Ok(Json(PipelineExecuteResponse { output, warnings }))
-    }
-
     /// Stores the workflow-to-PDF association after Garage ingestion succeeds.
     #[restate_sdk::handler]
     async fn link_workflow(
@@ -177,6 +184,22 @@ impl GarageRestateService {
             .link_workflow(&request.workflow_id, &request.pdf_hash)
             .await
             .map_err(to_postgres_handler_error)
+    }
+
+    /// Resolves immutable PDF metadata without putting the PDF in the journal.
+    #[restate_sdk::handler]
+    async fn get_pdf(
+        &self,
+        _ctx: Context<'_>,
+        pdf_hash: Json<String>,
+    ) -> HandlerResult<Json<StoredPdf>> {
+        self.pipeline
+            .metadata()
+            .get(&pdf_hash.into_inner())
+            .await
+            .map_err(to_postgres_handler_error)?
+            .map(Json)
+            .ok_or_else(|| TerminalError::new("PDF metadata was not found").into())
     }
 }
 
@@ -226,6 +249,16 @@ where
         .execute(&request.workflow_id, &request.input)
         .await
         .map_err(to_handler_error)
+}
+
+async fn load_pdf(
+    pdfs: &GaragePipelineService,
+    pdf_hash: &str,
+) -> HandlerResult<(StoredPdf, Vec<u8>)> {
+    pdfs.load(pdf_hash)
+        .await
+        .map_err(|error| HandlerError::from(std::io::Error::other(error.to_string())))?
+        .ok_or_else(|| TerminalError::new(format!("PDF {pdf_hash} was not found")).into())
 }
 
 fn to_handler_error(error: PipelineExecutionError) -> HandlerError {
