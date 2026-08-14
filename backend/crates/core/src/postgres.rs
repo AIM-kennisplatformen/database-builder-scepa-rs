@@ -8,8 +8,8 @@ use crate::pipeline::{FailureDisposition, FailureRecord, ReviewStore};
 
 /// A durable, idempotent [`ReviewStore`] backed by PostgreSQL.
 ///
-/// A workflow can replay a successful database write before Restate has
-/// journaled its result. The database uniqueness constraint on workflow,
+/// An orchestrator can replay a successful database write before journaling
+/// its result. The database uniqueness constraint on workflow,
 /// service, and phase makes that replay a no-op instead of creating a duplicate
 /// review case.
 #[derive(Clone)]

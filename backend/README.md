@@ -3,9 +3,9 @@
 This directory is the complete Rust backend workspace.
 
 ```text
-crates/api/    HTTP API and Restate endpoint (`scepa-api`)
+crates/api/    HTTP API (`scepa-api`)
 crates/cli/    Operator command-line interface (`scepa-cli`)
-crates/core/   Shared domain, pipeline, storage, and workflow code (`scepa`)
+crates/core/   Shared domain, pipeline, and storage code (`scepa`)
 ```
 
 Common commands:
