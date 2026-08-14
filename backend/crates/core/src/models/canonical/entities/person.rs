@@ -1,14 +1,20 @@
 use crate::models::canonical::relations::{affiliation, contribution};
 use nonempty_collections::NEVec;
-use std::rc::Rc;
+use std::sync::Arc;
 
-pub trait TPerson {
+#[typetag::serde(tag = "type")]
+pub trait TPerson: Send + Sync {
     fn person_id(&self) -> &str;
     fn given_name(&self) -> Option<&str>;
     fn family_name(&self) -> Option<&str>;
 }
 
-impl<T: TPerson + ?Sized> affiliation::TPerson for T {}
+#[typetag::serde(name = "person")]
+impl affiliation::TPerson for Person {
+    fn person_id(&self) -> &str {
+        &self.person_id
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
 #[builder(on(String, into))]
@@ -21,11 +27,21 @@ pub struct Person {
 #[derive(bon::Builder)]
 pub struct APerson {
     pub person: Person,
-    pub contributions: NEVec<Rc<dyn contribution::TContribution>>,
-    pub affiliations: Vec<Rc<dyn affiliation::TAffiliation>>,
+    pub contributions: NEVec<Arc<dyn contribution::TContribution>>,
+    pub affiliations: Vec<Arc<dyn affiliation::TAffiliation>>,
 }
 
-impl contribution::TContributor for Person {}
+#[typetag::serde(name = "person")]
+impl contribution::TContributor for Person {
+    fn contributor_id(&self) -> &str {
+        &self.person_id
+    }
+
+    fn contributor_kind(&self) -> contribution::ContributorKind {
+        contribution::ContributorKind::Person
+    }
+}
+#[typetag::serde(name = "person")]
 impl TPerson for Person {
     fn person_id(&self) -> &str {
         &self.person_id

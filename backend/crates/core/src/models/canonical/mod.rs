@@ -1,10 +1,6 @@
 pub mod model;
 
-pub use model::{
-    CanonicalAffiliation, CanonicalContribution, CanonicalContributor, CanonicalDocument,
-    CanonicalModel, CanonicalOrganization, CanonicalPublicationEvent,
-    CanonicalPublicationEventKind, CanonicalPublicationVenue,
-};
+pub use model::CanonicalModel;
 
 pub mod entities {
     pub mod document;
