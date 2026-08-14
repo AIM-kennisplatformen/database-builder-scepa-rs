@@ -85,15 +85,21 @@ impl<W> ValidationReport<W> {
 
 /// The successful result of a pipeline execution.
 ///
-/// The output is released through [`PipelineOutcome::into_output`], which
-/// requires callers to explicitly acknowledge any validation warnings first.
-#[must_use = "call into_output and acknowledge any pipeline warnings"]
+/// Callers can either acknowledge warnings through [`PipelineOutcome::into_output`]
+/// or retain them alongside the output through [`PipelineOutcome::into_parts`].
+#[derive(Clone, Debug, PartialEq)]
+#[must_use = "call into_output to acknowledge warnings or into_parts to retain them"]
 pub struct PipelineOutcome<T, W> {
     output: T,
     warnings: Vec<W>,
 }
 
 impl<T, W> PipelineOutcome<T, W> {
+    /// Splits the outcome into its wire-friendly output and warning values.
+    pub fn into_parts(self) -> (T, Vec<W>) {
+        (self.output, self.warnings)
+    }
+
     /// Acknowledges validation warnings and returns the pipeline output.
     ///
     /// `handle_warnings` is invoked exactly once, including when no warnings
@@ -108,6 +114,37 @@ impl<T, W> PipelineOutcome<T, W> {
         &self.warnings
     }
 }
+
+/// A pipeline failure together with the retry decision made by the service.
+///
+/// Durable adapters use this type to preserve [`PipelineService`]'s failure
+/// classification when translating an error into an orchestrator-specific
+/// error type.
+#[derive(Debug)]
+pub struct PipelineExecutionError {
+    disposition: FailureDisposition,
+    source: eros::ErrorUnion,
+}
+
+impl PipelineExecutionError {
+    /// Whether a durable orchestrator should retry the failed execution.
+    pub fn disposition(&self) -> FailureDisposition {
+        self.disposition
+    }
+
+    /// Returns the underlying pipeline or failure-staging error.
+    pub fn into_source(self) -> eros::ErrorUnion {
+        self.source
+    }
+}
+
+impl std::fmt::Display for PipelineExecutionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+impl Error for PipelineExecutionError {}
 
 /// The phase in which a pipeline service failed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -292,23 +329,25 @@ pub trait PipelineService: Send + Sync {
     ///
     /// # Failure behavior
     ///
-    /// A retryable phase failure is returned directly to the caller. A terminal
-    /// failure is first passed to [`ReviewStore::stage`]. Once staging succeeds,
-    /// the original phase error is returned.
+    /// A retryable phase failure is returned directly in a
+    /// [`PipelineExecutionError`]. A terminal failure is first passed to
+    /// [`ReviewStore::stage`]. Once staging succeeds, the original phase error
+    /// is retained as the source of a terminal [`PipelineExecutionError`].
     ///
-    /// If staging fails, the staging error is returned instead because durable
-    /// handoff to the review system could not be confirmed.
+    /// If staging fails, the staging error is retained as the source of a
+    /// retryable [`PipelineExecutionError`] because durable handoff to the
+    /// review system could not be confirmed.
     async fn execute(
         &self,
         workflow_id: &str,
         input: &Self::Input,
-    ) -> eros::Result<PipelineOutcome<Self::Output, Self::Warning>> {
+    ) -> Result<PipelineOutcome<Self::Output, Self::Warning>, PipelineExecutionError> {
         let mut report = match self.validate_input(input).await {
             Ok(report) => report,
 
             Err(error) => {
                 return self
-                    .handle_failure(
+                    .classify_failure(
                         workflow_id,
                         input,
                         None,
@@ -324,7 +363,7 @@ pub trait PipelineService: Send + Sync {
 
             Err(error) => {
                 return self
-                    .handle_failure(workflow_id, input, None, PipelinePhase::Processing, error)
+                    .classify_failure(workflow_id, input, None, PipelinePhase::Processing, error)
                     .await;
             }
         };
@@ -336,7 +375,7 @@ pub trait PipelineService: Send + Sync {
 
             Err(error) => {
                 return self
-                    .handle_failure(
+                    .classify_failure(
                         workflow_id,
                         input,
                         Some(&output),
@@ -353,48 +392,49 @@ pub trait PipelineService: Send + Sync {
         })
     }
 
-    /// Applies the service's failure disposition and propagates the error.
-    ///
-    /// If staging succeeds, `error` is returned unchanged. If staging fails,
-    /// the staging error is returned instead.
-    ///
-    /// Implementations normally do not need to override this method.
-    async fn handle_failure<T>(
+    /// Stages terminal failures and retains the resulting retry decision.
+    async fn classify_failure<T>(
         &self,
         workflow_id: &str,
         input: &Self::Input,
         output: Option<&Self::Output>,
         phase: PipelinePhase,
         error: eros::ErrorUnion,
-    ) -> eros::Result<T>
+    ) -> Result<T, PipelineExecutionError>
     where
         T: Send,
     {
         if self.failure_disposition(phase, &error) == FailureDisposition::Retryable {
-            return Err(error);
+            return Err(PipelineExecutionError {
+                disposition: FailureDisposition::Retryable,
+                source: error,
+            });
         }
 
-        self.stage_then_propagate(workflow_id, input, output, phase, error)
+        match self
+            .stage_failure(workflow_id, input, output, phase, &error)
             .await
+        {
+            Ok(()) => Err(PipelineExecutionError {
+                disposition: FailureDisposition::Terminal,
+                source: error,
+            }),
+            Err(staging_error) => Err(PipelineExecutionError {
+                disposition: FailureDisposition::Retryable,
+                source: staging_error,
+            }),
+        }
     }
 
-    /// Unconditionally stages a failure and then propagates the original error.
-    ///
-    /// A durable orchestrator can call this after it exhausts the retry policy
-    /// for an error that [`PipelineService::execute`] classified as retryable.
-    /// If staging succeeds, `error` is returned unchanged. If staging fails,
-    /// the staging error is returned instead.
-    async fn stage_then_propagate<T>(
+    /// Persists the failure record used by both execution entry points.
+    async fn stage_failure(
         &self,
         workflow_id: &str,
         input: &Self::Input,
         output: Option<&Self::Output>,
         phase: PipelinePhase,
-        error: eros::ErrorUnion,
-    ) -> eros::Result<T>
-    where
-        T: Send,
-    {
+        error: &eros::ErrorUnion,
+    ) -> eros::Result<()> {
         let artifact = self.review_artifact(input, output);
 
         let error_message = error.to_string();
@@ -411,7 +451,7 @@ pub trait PipelineService: Send + Sync {
             })
             .await?;
 
-        Err(error)
+        Ok(())
     }
 }
 
@@ -544,6 +584,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn classified_execution_preserves_retryable_failures() {
+        let store = RecordingStore::default();
+        let service = TestService {
+            failing_phase: FailingPhase::Processing,
+            processing_is_retryable: true,
+            review_store: store.clone(),
+        };
+
+        let error = service
+            .execute("workflow-1", &"input".into())
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.disposition(), FailureDisposition::Retryable);
+        assert!(store.failures.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn processing_failures_are_terminal_by_default() {
         let store = RecordingStore::default();
         let service = TestService {
@@ -558,6 +616,24 @@ mod tests {
                 .await
                 .is_err()
         );
+        assert_eq!(store.failures.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn classified_execution_preserves_staged_terminal_failures() {
+        let store = RecordingStore::default();
+        let service = TestService {
+            failing_phase: FailingPhase::Processing,
+            processing_is_retryable: false,
+            review_store: store.clone(),
+        };
+
+        let error = service
+            .execute("workflow-1", &"input".into())
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.disposition(), FailureDisposition::Terminal);
         assert_eq!(store.failures.lock().unwrap().len(), 1);
     }
 

@@ -85,8 +85,27 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  restate:
+    profiles: [server]
+    image: docker.restate.dev/restatedev/restate:1.7.2
+    command: ["--node-name=restate-1"]
+    ports:
+      - "${RESTATE_INGRESS_PORT}:8080"
+      - "${RESTATE_ADMIN_PORT}:9070"
+      - "${RESTATE_FABRIC_PORT}:5122"
+    volumes:
+      - restate_data:/restate-data
+    healthcheck:
+      test: ["CMD", "restatectl", "status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
 volumes:
   garage_data:
   garage_meta:
   postgres_data:
+  restate_data:
   typedb_data:
