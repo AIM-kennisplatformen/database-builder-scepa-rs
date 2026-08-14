@@ -51,7 +51,8 @@ The stack exposes:
 ## API
 
 `POST /pdfs` submits a PDF to `NewDocumentWorkflow`, using its SHA-256 hash as
-the workflow identifier, and waits for the workflow result.
+the workflow identifier, and waits for extraction, validation, and TypeDB
+publication to complete.
 
 ```bash
 curl --request POST \
@@ -61,7 +62,13 @@ curl --request POST \
 ```
 
 `POST /pdfs/submissions/{workflow_id}` stores the PDF and starts the workflow
-without waiting for its result. The CLI uses this asynchronous route.
+without waiting for its result. The CLI uses this asynchronous route. A `202`
+response confirms durable acceptance; successful workflows subsequently publish
+to TypeDB, while pipeline failures are retained for operator review.
+
+`GET /documents/requiring-fixing` returns every pending review case, newest
+first, including its document hash (when available), failed pipeline phase,
+error, artifact metadata, and retryability.
 
 ## Pipeline CLI
 
