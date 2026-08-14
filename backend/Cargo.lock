@@ -2862,6 +2862,7 @@ dependencies = [
  "restate-sdk",
  "scepa",
  "serde",
+ "serde_json",
  "tokio",
  "tower-http",
  "tracing",

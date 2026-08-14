@@ -20,6 +20,25 @@ use crate::models::{
 #[async_trait]
 pub trait CanonicalDocumentStore: Send + Sync {
     async fn insert(&self, model: &CanonicalModel) -> eros::Result<()>;
+    async fn update(
+        &self,
+        old: &CanonicalModel,
+        new: &CanonicalModel,
+    ) -> eros::Result<CanonicalUpdateSummary>;
+}
+
+/// The graph sections touched by one update transaction.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CanonicalUpdateSummary {
+    pub document_changed: bool,
+    pub contributors_deleted: usize,
+    pub contributors_inserted: usize,
+}
+
+impl CanonicalUpdateSummary {
+    pub fn changed(&self) -> bool {
+        self.document_changed || self.contributors_deleted != 0 || self.contributors_inserted != 0
+    }
 }
 
 /// A TypeDB-backed canonical document store.
@@ -105,6 +124,65 @@ impl CanonicalDocumentStore for TypeDbStore {
         transaction.commit().await?;
         Ok(())
     }
+
+    async fn update(
+        &self,
+        old: &CanonicalModel,
+        new: &CanonicalModel,
+    ) -> eros::Result<CanonicalUpdateSummary> {
+        let document_changed = old.document != new.document;
+        let replace_document = !document_identity_equal(&old.document, &new.document);
+        let deleted = if replace_document {
+            old.contributors.iter().collect::<Vec<_>>()
+        } else {
+            old.contributors
+                .iter()
+                .filter(|contributor| !new.contributors.contains(contributor))
+                .collect()
+        };
+        let inserted = if replace_document {
+            new.contributors.iter().collect::<Vec<_>>()
+        } else {
+            new.contributors
+                .iter()
+                .filter(|contributor| !old.contributors.contains(contributor))
+                .collect()
+        };
+        let summary = CanonicalUpdateSummary {
+            document_changed,
+            contributors_deleted: deleted.len(),
+            contributors_inserted: inserted.len(),
+        };
+        if !summary.changed() {
+            return Ok(summary);
+        }
+
+        let transaction = self
+            .driver
+            .transaction(&self.database, TransactionType::Write)
+            .await?;
+
+        for contributor in deleted {
+            let (query, rows) = contribution_delete_query(&old.document, contributor)?;
+            transaction.query_with_rows(query, rows).await?;
+        }
+        if replace_document {
+            let (query, rows) = document_delete_query(&old.document)?;
+            transaction.query_with_rows(query, rows).await?;
+            let (query, rows) = document_insert_query(&new.document)?;
+            transaction.query_with_rows(query, rows).await?;
+        } else if document_changed {
+            let (query, rows) = document_title_update_query(&old.document, &new.document)?;
+            transaction.query_with_rows(query, rows).await?;
+        }
+        for contributor in inserted {
+            let (query, rows) = contribution_insert_query(&new.document, contributor)?;
+            transaction.query_with_rows(query, rows).await?;
+        }
+
+        transaction.commit().await?;
+        Ok(summary)
+    }
 }
 
 /// Validates a draft by canonicalising it, then writes only canonical models.
@@ -177,6 +255,15 @@ where
     /// Inserts a previously validated canonical model into TypeDB.
     pub async fn execute(&self, canonical: &CanonicalModel) -> eros::Result<()> {
         self.store.insert(canonical).await
+    }
+
+    /// Replaces only graph sections whose canonical values changed.
+    pub async fn execute_update(
+        &self,
+        old: &CanonicalModel,
+        new: &CanonicalModel,
+    ) -> eros::Result<CanonicalUpdateSummary> {
+        self.store.update(old, new).await
     }
 
     /// Runs pre-validation and inserts its canonical result.
@@ -284,6 +371,79 @@ fn contribution_insert_query(
     Ok((query, rows))
 }
 
+fn document_delete_query(document: &CanonicalDocument) -> eros::Result<(String, GivenRows)> {
+    let mut rows = GivenRows::new(vec!["document_id".to_owned()], 1);
+    rows.push_row(vec![document.document_id().to_owned().into()])?;
+    Ok((
+        "given $document_id: string; match $document isa document, has document_id == $document_id; delete $document;".to_owned(),
+        rows,
+    ))
+}
+
+fn document_identity_equal(old: &CanonicalDocument, new: &CanonicalDocument) -> bool {
+    old.entity_type() == new.entity_type()
+        && old.document_id() == new.document_id()
+        && old.pdf_hash() == new.pdf_hash()
+        && match (old, new) {
+            (CanonicalDocument::ResearchPaper(old), CanonicalDocument::ResearchPaper(new)) => {
+                old.doi == new.doi
+            }
+            (CanonicalDocument::Book(old), CanonicalDocument::Book(new)) => old.isbn == new.isbn,
+            (CanonicalDocument::Document(_), CanonicalDocument::Document(_)) => true,
+            _ => false,
+        }
+}
+
+fn document_title_update_query(
+    old: &CanonicalDocument,
+    new: &CanonicalDocument,
+) -> eros::Result<(String, GivenRows)> {
+    let mut rows = GivenRows::new(
+        vec![
+            "document_id".to_owned(),
+            "old_title".to_owned(),
+            "new_title".to_owned(),
+        ],
+        1,
+    );
+    rows.push_row(vec![
+        old.document_id().to_owned().into(),
+        old.title().to_owned().into(),
+        new.title().to_owned().into(),
+    ])?;
+    Ok((
+        "given $document_id: string, $old_title: string, $new_title: string; \
+         match $document isa document, has document_id == $document_id, has title == $old_title; \
+         delete has $old_title of $document; \
+         insert $document has title == $new_title;"
+            .to_owned(),
+        rows,
+    ))
+}
+
+fn contribution_delete_query(
+    document: &CanonicalDocument,
+    contributor: &CanonicalContributor,
+) -> eros::Result<(String, GivenRows)> {
+    let relation_type = match contributor.contribution {
+        CanonicalContribution::Authorship => "authorship",
+        CanonicalContribution::Contribution => "contribution",
+    };
+    let query = format!(
+        "given $document_id: string, $person_id: string; \
+         match $document isa document, has document_id == $document_id; \
+         $person isa person, has person_id == $person_id; \
+         $contribution isa {relation_type}, links (contributor: $person, work: $document); \
+         delete $contribution; delete $person;"
+    );
+    let mut rows = GivenRows::new(vec!["document_id".to_owned(), "person_id".to_owned()], 1);
+    rows.push_row(vec![
+        document.document_id().to_owned().into(),
+        contributor.person.person_id.clone().into(),
+    ])?;
+    Ok((query, rows))
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
@@ -302,6 +462,28 @@ mod tests {
         async fn insert(&self, model: &CanonicalModel) -> eros::Result<()> {
             self.0.lock().unwrap().push(model.clone());
             Ok(())
+        }
+
+        async fn update(
+            &self,
+            old: &CanonicalModel,
+            new: &CanonicalModel,
+        ) -> eros::Result<CanonicalUpdateSummary> {
+            let document_changed = old.document != new.document;
+            let replace_document = !document_identity_equal(&old.document, &new.document);
+            Ok(CanonicalUpdateSummary {
+                document_changed,
+                contributors_deleted: old
+                    .contributors
+                    .iter()
+                    .filter(|row| replace_document || !new.contributors.contains(row))
+                    .count(),
+                contributors_inserted: new
+                    .contributors
+                    .iter()
+                    .filter(|row| replace_document || !old.contributors.contains(row))
+                    .count(),
+            })
         }
     }
 
@@ -376,6 +558,44 @@ mod tests {
         assert!(query.contains("isa authorship"));
         assert!(query.contains("links (contributor: $person, work: $document)"));
         assert_eq!(values[0].len(), 4);
+    }
+
+    #[tokio::test]
+    async fn unchanged_update_executes_no_graph_parts() {
+        let service = TypeDbService::new(RecordingStore::default());
+        let canonical = CanonicalModel::try_from(&draft()).unwrap();
+
+        let summary = service
+            .execute_update(&canonical, &canonical)
+            .await
+            .unwrap();
+
+        assert_eq!(summary, CanonicalUpdateSummary::default());
+    }
+
+    #[test]
+    fn delete_queries_target_stable_identifiers() {
+        let canonical = CanonicalModel::try_from(&draft()).unwrap();
+        let (document_query, _) = document_delete_query(&canonical.document).unwrap();
+        let (contribution_query, _) =
+            contribution_delete_query(&canonical.document, &canonical.contributors[0]).unwrap();
+
+        assert!(document_query.contains("has document_id == $document_id"));
+        assert!(contribution_query.contains("has person_id == $person_id"));
+        assert!(contribution_query.contains("delete $contribution"));
+    }
+
+    #[test]
+    fn title_only_update_keeps_document_identity() {
+        let old = CanonicalModel::try_from(&draft()).unwrap();
+        let mut changed_draft = draft();
+        changed_draft.bibliography.title = Some("A corrected title".into());
+        let new = CanonicalModel::try_from(&changed_draft).unwrap();
+        let (query, _) = document_title_update_query(&old.document, &new.document).unwrap();
+
+        assert!(document_identity_equal(&old.document, &new.document));
+        assert!(query.contains("delete has $old_title of $document"));
+        assert!(query.contains("insert $document has title == $new_title"));
     }
 
     #[tokio::test]

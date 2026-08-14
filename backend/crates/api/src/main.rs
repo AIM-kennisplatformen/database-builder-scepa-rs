@@ -7,7 +7,8 @@ use restate_sdk::prelude::{Endpoint, HttpServer};
 use scepa::{
     orchestration::{
         DocumentExtractionWorkflow, DocumentRestateService, GarageRestateService,
-        NewDocumentIngressClient, NewDocumentWorkflow, TypeDbRestateService,
+        NewDocumentIngressClient, NewDocumentWorkflow, PublishedArtifactRestateService,
+        TypeDbRestateService, UpdateDocumentIngressClient, UpdateDocumentWorkflow,
     },
     pipeline::{
         DocumentPipelineService,
@@ -78,8 +79,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             garage_pipeline.clone(),
         ))
         .bind(TypeDbRestateService::new(typedb.clone()))
+        .bind(PublishedArtifactRestateService::new(review_store.clone()))
         .bind(DocumentExtractionWorkflow)
         .bind(NewDocumentWorkflow)
+        .bind(UpdateDocumentWorkflow)
         .build();
     let restate_listener = TcpListener::bind(restate_endpoint_address).await?;
     tokio::spawn(HttpServer::new(restate_endpoint).serve(restate_listener));
@@ -89,6 +92,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let api_listener = TcpListener::bind(api_address).await?;
     let state = api::AppState::new(
         NewDocumentIngressClient::new(&restate_ingress_url)?,
+        UpdateDocumentIngressClient::new(&restate_ingress_url)?,
         garage_pipeline,
         review_store,
         typedb,

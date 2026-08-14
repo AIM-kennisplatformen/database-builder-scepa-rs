@@ -9,6 +9,7 @@ reqwest = { version = "0.13.4", features = ["json"] }
 restate-sdk = "0.11.0"
 scepa = { path = "../core" }
 serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
 tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
 tower-http = { version = "0.6.6", features = ["cors", "trace"] }
 tracing = "0.1.41"

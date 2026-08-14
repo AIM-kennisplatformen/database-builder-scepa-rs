@@ -4,14 +4,17 @@ use restate_sdk::prelude::{Context, HandlerError, HandlerResult, Json, TerminalE
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    models::{canonical::CanonicalModel, draft::TeiDocument},
+    models::{
+        canonical::CanonicalModel,
+        draft::{DraftDocument, TeiDocument},
+    },
     pipeline::{
         DocumentPipelineOutput, DocumentPipelineService, DocumentPipelineWarning,
         FailureDisposition, PipelineExecutionError, PipelineOutcome, PipelineService,
         garage::{GaragePipelineService, StoredPdf},
         grobid::{GrobidExtractionService, GrobidValidationWarning, HttpGrobidClient},
         tei::{TeiConversionService, TeiValidationWarning},
-        typedb::{TypeDbService, TypeDbStore},
+        typedb::{CanonicalUpdateSummary, TypeDbService, TypeDbStore},
     },
     postgres::PostgresReviewStore,
 };
@@ -51,6 +54,26 @@ pub struct LinkWorkflowPdfRequest {
 pub struct TypeDbExecuteRequest {
     pub pdf_hash: String,
     pub document: TeiDocument,
+}
+
+/// Old and new effective artifacts for a selective graph update.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TypeDbUpdateRequest {
+    pub pdf_hash: String,
+    pub old_document: TeiDocument,
+    pub new_document: TeiDocument,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TypeDbUpdateResponse {
+    pub canonical: CanonicalModel,
+    pub changes: CanonicalUpdateSummary,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StorePublishedArtifactRequest {
+    pub pdf_hash: String,
+    pub artifact: DraftDocument,
 }
 
 impl<O, W> From<PipelineOutcome<O, W>> for PipelineExecuteResponse<O, W> {
@@ -235,6 +258,82 @@ impl TypeDbRestateService {
             .map_err(|error| std::io::Error::other(error.to_string()))?;
 
         Ok(Json(canonical))
+    }
+
+    /// Uses the old canonical artifact for deletes and the new one for inserts.
+    #[restate_sdk::handler]
+    async fn update(
+        &self,
+        _ctx: Context<'_>,
+        request: Json<TypeDbUpdateRequest>,
+    ) -> HandlerResult<Json<TypeDbUpdateResponse>> {
+        let request = request.into_inner();
+        let old = self
+            .service
+            .pre_validate_with_pdf_hash(&request.old_document, &request.pdf_hash)
+            .await
+            .map_err(|error| TerminalError::new(error.to_string()))?;
+        let new = self
+            .service
+            .pre_validate_with_pdf_hash(&request.new_document, &request.pdf_hash)
+            .await
+            .map_err(|error| TerminalError::new(error.to_string()))?;
+        let changes = self
+            .service
+            .execute_update(&old, &new)
+            .await
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+
+        Ok(Json(TypeDbUpdateResponse {
+            canonical: new,
+            changes,
+        }))
+    }
+}
+
+/// Restate boundary for the published artifact used as the next update baseline.
+pub struct PublishedArtifactRestateService {
+    store: PostgresReviewStore,
+}
+
+impl PublishedArtifactRestateService {
+    pub fn new(store: PostgresReviewStore) -> Self {
+        Self { store }
+    }
+}
+
+#[restate_sdk::service(name = "PublishedArtifactStore")]
+impl PublishedArtifactRestateService {
+    #[restate_sdk::handler]
+    async fn get_published(
+        &self,
+        _ctx: Context<'_>,
+        pdf_hash: Json<String>,
+    ) -> HandlerResult<Json<Option<DraftDocument>>> {
+        let document = self
+            .store
+            .get_published_document(&pdf_hash.into_inner())
+            .await
+            .map_err(to_postgres_handler_error)?;
+        Ok(Json(document.map(|document| document.artifact)))
+    }
+
+    #[restate_sdk::handler]
+    async fn store_published(
+        &self,
+        _ctx: Context<'_>,
+        request: Json<StorePublishedArtifactRequest>,
+    ) -> HandlerResult<()> {
+        let request = request.into_inner();
+        let stored = self
+            .store
+            .store_published_artifact(&request.pdf_hash, &request.artifact)
+            .await
+            .map_err(to_postgres_handler_error)?;
+        if !stored {
+            return Err(TerminalError::new("document artifact was not found").into());
+        }
+        Ok(())
     }
 }
 
