@@ -11,7 +11,7 @@ impl<T: TPublicationVenue + ?Sized> publication_event::TPublicationVenue for T {
 
 pub trait TJournal: TPublicationVenue {}
 
-#[derive(bon::Builder)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
 #[builder(on(String, into))]
 pub struct Journal {
     pub venue_id: String,
@@ -42,7 +42,7 @@ impl TJournal for Journal {}
 
 pub trait TConference: TPublicationVenue {}
 
-#[derive(bon::Builder)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
 #[builder(on(String, into))]
 pub struct Conference {
     pub venue_id: String,

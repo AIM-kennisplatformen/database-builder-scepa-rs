@@ -124,7 +124,7 @@ impl TBook for Book {
 
 pub trait TReport: TDocument {}
 
-#[derive(bon::Builder)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
 #[builder(on(String, into))]
 pub struct Report {
     pub document_id: String,
