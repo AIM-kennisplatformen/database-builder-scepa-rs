@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
 use reqwest::{StatusCode, header};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 
@@ -17,7 +17,7 @@ use crate::postgres::PostgresReviewStore;
 type HmacSha256 = Hmac<Sha256>;
 
 /// PostgreSQL metadata for one immutable PDF object.
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, sqlx::FromRow)]
 pub struct StoredPdf {
     pub pdf_hash: String,
     pub bucket: String,

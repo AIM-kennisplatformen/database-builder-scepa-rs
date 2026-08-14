@@ -14,6 +14,7 @@ nonempty-collections = "1.4.0"
 qdrant-client = "1.19.0"
 quick-xml = "0.38.3"
 reqwest = { version = "0.13.4", features = ["json", "multipart"] }
+restate-sdk = "0.11.0"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.142"
 sha2 = "0.10.9"

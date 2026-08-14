@@ -43,6 +43,8 @@ The stack exposes:
 - Garage S3 API: `http://localhost:3900`
 - Garage admin API: `http://localhost:3903`
 - PostgreSQL: `localhost:5432`
+- Restate ingress: `http://localhost:8080`
+- Restate admin UI/API: `http://localhost:9070`
 - TypeDB gRPC: `localhost:1729`
 - TypeDB HTTP: `http://localhost:8000`
 
