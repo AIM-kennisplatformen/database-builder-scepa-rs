@@ -13,5 +13,5 @@ RUN apt-get update \
 
 COPY --from=builder /app/target/release/scepa-api /usr/local/bin/scepa-api
 
-EXPOSE 3000 9080
+EXPOSE 3000
 ENTRYPOINT ["scepa-api"]

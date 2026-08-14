@@ -2,7 +2,6 @@
 
 use std::{error::Error, fmt, str::FromStr};
 
-use crate::restate::PipelineRequest;
 use crate::{
     pipeline::{
         DocumentPipelineOutput, DocumentPipelineService, PipelineService,
@@ -12,7 +11,6 @@ use crate::{
     },
     postgres::PostgresReviewStore,
 };
-use reqwest::header;
 use serde::{Deserialize, Serialize};
 
 /// Independently invokable parts of the composite Grobid pipeline.
@@ -162,53 +160,6 @@ pub async fn run_artifact_operation(
     })
 }
 
-/// Submits a PDF to the durable pipeline without waiting for its output.
-pub async fn submit_pipeline(
-    client: &reqwest::Client,
-    restate_ingress_url: &str,
-    identifier: &str,
-    pdf_hash: &str,
-) -> Result<reqwest::Response, OperationError> {
-    if pdf_hash.len() != 64
-        || !pdf_hash
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return Err(OperationError::Invalid(
-            "PDF hash must be a lowercase SHA-256 digest".into(),
-        ));
-    }
-
-    let url = restate_url(
-        restate_ingress_url,
-        &["ScepaPipeline", identifier, "run", "send"],
-    )?;
-    client
-        .post(url)
-        .header(header::CONTENT_TYPE, "application/json")
-        .json(&PipelineRequest {
-            pdf_hash: pdf_hash.to_owned(),
-        })
-        .send()
-        .await
-        .map_err(|error| OperationError::Internal(format!("Restate is unavailable: {error}")))
-}
-
-pub fn restate_url(base: &str, segments: &[&str]) -> Result<reqwest::Url, OperationError> {
-    let mut url = reqwest::Url::parse(base)
-        .map_err(|error| OperationError::Internal(format!("invalid Restate URL: {error}")))?;
-    {
-        let mut path = url
-            .path_segments_mut()
-            .map_err(|()| OperationError::Internal("invalid Restate URL".into()))?;
-        path.pop_if_empty();
-        for segment in segments {
-            path.push(segment);
-        }
-    }
-    Ok(url)
-}
-
 fn require_content_type(
     actual: &str,
     expected: &str,
@@ -239,18 +190,4 @@ fn invalid_pipeline(error: impl fmt::Display) -> OperationError {
 
 fn internal(error: impl fmt::Display) -> OperationError {
     OperationError::Internal(error.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn workflow_ids_are_url_encoded_as_single_segments() {
-        let url = restate_url("http://localhost:8080", &["Pipeline", "paper/one", "run"]).unwrap();
-        assert_eq!(
-            url.as_str(),
-            "http://localhost:8080/Pipeline/paper%2Fone/run"
-        );
-    }
 }

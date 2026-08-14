@@ -1,14 +1,6 @@
-use std::{env, error::Error, path::PathBuf, time::Duration};
+use std::{error::Error, path::PathBuf};
 
 use clap::{Parser, Subcommand};
-use scepa::{
-    operations::submit_pipeline,
-    pipeline::{
-        PipelineService,
-        garage::{GarageClient, GaragePipelineService, PostgresPdfStore},
-    },
-    postgres::PostgresReviewStore,
-};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -23,148 +15,34 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Submits a single PDF to the document pipeline.
+    /// Uploads a single PDF.
     Single {
-        /// Overrides the PDF file stem used as the Restate workflow identifier.
+        /// Overrides the PDF file stem used as the workflow identifier.
         #[arg(long)]
         identifier: Option<String>,
-        /// PDF to submit.
+        /// PDF to upload.
         pdf: PathBuf,
     },
-    /// Submits every PDF in a directory to the document pipeline.
+    /// Uploads every PDF in a directory.
     Batch {
-        /// Directory containing PDFs to submit.
+        /// Directory containing PDFs to upload.
         directory: PathBuf,
     },
 }
 
-struct Runtime {
-    http_client: reqwest::Client,
-    restate_ingress_url: String,
-    garage_pipeline: GaragePipelineService,
-}
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    let cli = Cli::parse();
-    let runtime = Runtime::from_env().await?;
-    match cli.command {
-        Command::Single { identifier, pdf } => {
-            submit_file(&runtime, &pdf, identifier.as_deref()).await
-        }
-        Command::Batch { directory } => submit_batch(&runtime, &directory).await,
+fn main() -> Result<(), Box<dyn Error>> {
+    match Cli::parse().command {
+        Command::Single { identifier, pdf } => upload_pdf(pdf, identifier),
+        Command::Batch { directory } => upload_batch(directory),
     }
 }
 
-impl Runtime {
-    async fn from_env() -> Result<Self, Box<dyn Error>> {
-        let database_url = env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://scepa:scepa@localhost:5432/scepa".into());
-        let review_store = PostgresReviewStore::connect_lazy(&database_url)
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-        review_store
-            .migrate()
-            .await
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-        let http_client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(600))
-            .build()?;
-        let garage = GarageClient::new(
-            http_client.clone(),
-            &env::var("GARAGE_ENDPOINT").unwrap_or_else(|_| "http://localhost:3900".into()),
-            env::var("GARAGE_REGION").unwrap_or_else(|_| "garage".into()),
-            env::var("GARAGE_ACCESS_KEY")
-                .unwrap_or_else(|_| "GK00000000000000000000000000000000".into()),
-            env::var("GARAGE_SECRET_KEY").unwrap_or_else(|_| {
-                "0000000000000000000000000000000000000000000000000000000000000000".into()
-            }),
-        )
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
-        let garage_pipeline = GaragePipelineService::new(
-            PostgresPdfStore::new(review_store.pool().clone()),
-            garage,
-            env::var("GARAGE_BUCKET").unwrap_or_else(|_| "scepa-pdfs".into()),
-            review_store.clone(),
-        );
-        Ok(Self {
-            http_client,
-            restate_ingress_url: env::var("RESTATE_INGRESS_URL")
-                .unwrap_or_else(|_| "http://localhost:8080".into()),
-            garage_pipeline,
-        })
-    }
+fn upload_pdf(_pdf: PathBuf, _identifier: Option<String>) -> Result<(), Box<dyn Error>> {
+    todo!()
 }
 
-async fn submit_batch(runtime: &Runtime, directory: &PathBuf) -> Result<(), Box<dyn Error>> {
-    let mut files = pdf_files(directory).await?;
-    files.sort();
-    if files.is_empty() {
-        return Err(format!("{} contains no PDF files", directory.display()).into());
-    }
-    for file in files {
-        submit_file(runtime, &file, None).await?;
-    }
-    Ok(())
-}
-
-async fn submit_file(
-    runtime: &Runtime,
-    path: &PathBuf,
-    identifier: Option<&str>,
-) -> Result<(), Box<dyn Error>> {
-    let identifier = match identifier {
-        Some(identifier) if !identifier.is_empty() => identifier,
-        Some(_) => return Err("--identifier must not be empty".into()),
-        None => path
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| format!("{} has no usable file stem", path.display()))?,
-    };
-    let pdf = tokio::fs::read(path).await?;
-    let stored = runtime
-        .garage_pipeline
-        .execute(identifier, &pdf)
-        .await
-        .map_err(|error| std::io::Error::other(error.to_string()))?
-        .into_output(|_| {});
-    runtime
-        .garage_pipeline
-        .metadata()
-        .link_workflow(identifier, &stored.pdf_hash)
-        .await
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
-    let response = submit_pipeline(
-        &runtime.http_client,
-        &runtime.restate_ingress_url,
-        identifier,
-        &stored.pdf_hash,
-    )
-    .await?;
-    let status = response.status();
-    let body = response.text().await?;
-    println!("{identifier}: {status} {body}");
-    if !status.is_success() {
-        return Err(format!("pipeline submission failed for {identifier}").into());
-    }
-    Ok(())
-}
-
-async fn pdf_files(directory: &PathBuf) -> Result<Vec<PathBuf>, Box<dyn Error>> {
-    let mut entries = tokio::fs::read_dir(directory).await?;
-    let mut files = Vec::new();
-    while let Some(entry) = entries.next_entry().await? {
-        let path = entry.path();
-        if entry.file_type().await?.is_file()
-            && path
-                .extension()
-                .and_then(|value| value.to_str())
-                .is_some_and(|value| value.eq_ignore_ascii_case("pdf"))
-        {
-            files.push(path);
-        }
-    }
-    Ok(files)
+fn upload_batch(_directory: PathBuf) -> Result<(), Box<dyn Error>> {
+    todo!()
 }
 
 #[cfg(test)]

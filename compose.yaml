@@ -4,33 +4,9 @@ services:
     build:
       context: ./backend
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      TYPEDB_ADDRESS: ${TYPEDB_ADDRESS}
-      TYPEDB_DATABASE: ${TYPEDB_DATABASE}
-      TYPEDB_USERNAME: ${TYPEDB_USERNAME}
-      TYPEDB_PASSWORD: ${TYPEDB_PASSWORD}
-      GROBID_URL: http://grobid:8070
-      GARAGE_ENDPOINT: ${GARAGE_ENDPOINT}
-      GARAGE_REGION: garage
-      GARAGE_BUCKET: ${GARAGE_BUCKET}
-      GARAGE_ACCESS_KEY: ${GARAGE_ACCESS_KEY}
-      GARAGE_SECRET_KEY: ${GARAGE_SECRET_KEY}
-      RESTATE_INGRESS_URL: http://restate:8080
-      RESTATE_ADMIN_URL: http://restate:9070
-      DEBUG_ARTIFACT_ROOT: /app/.artifacts
       RUST_LOG: ${RUST_LOG}
-    volumes:
-      - ./.artifacts:/app/.artifacts
     ports:
       - "${API_PORT}:3000"
-      - "${RESTATE_SERVICE_PORT}:9080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      grobid:
-        condition: service_healthy
-      restate:
-        condition: service_healthy
     restart: unless-stopped
 
   typedb:
@@ -109,45 +85,8 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  restate:
-    profiles: [server]
-    image: docker.restate.dev/restatedev/restate:1.7.2
-    command: ["--node-name=restate-1"]
-    ports:
-      - "${RESTATE_INGRESS_PORT}:8080"
-      - "${RESTATE_ADMIN_PORT}:9070"
-      - "${RESTATE_FABRIC_PORT}:5122"
-    volumes:
-      - restate_data:/restate-data
-    healthcheck:
-      test: ["CMD", "restatectl", "status"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 10s
-    restart: unless-stopped
-
-  restate-register:
-    profiles: [server]
-    image: curlimages/curl:8.16.0
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >-
-        until curl --fail --silent --show-error
-        -X POST http://restate:9070/deployments
-        -H 'content-type: application/json'
-        -d '{"uri":"http://app:9080"}';
-        do sleep 2; done
-    depends_on:
-      app:
-        condition: service_started
-      restate:
-        condition: service_healthy
-    restart: "no"
-
 volumes:
   garage_data:
   garage_meta:
   postgres_data:
-  restate_data:
   typedb_data:

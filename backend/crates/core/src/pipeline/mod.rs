@@ -164,7 +164,7 @@ pub struct ReviewArtifact {
 /// timestamps, retry state, source records, or tenant information.
 #[derive(Debug)]
 pub struct FailureRecord {
-    /// Stable identifier of the Restate workflow or other durable execution.
+    /// Stable identifier of the durable execution.
     ///
     /// Review stores use this with `service` and `phase` as an idempotency key.
     pub workflow_id: String,
