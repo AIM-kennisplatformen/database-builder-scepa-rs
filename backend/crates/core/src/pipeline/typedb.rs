@@ -134,16 +134,7 @@ impl<S> TypeDbService<S> {
         draft: &TeiDocument,
         pdf_hash: &str,
     ) -> eros::Result<CanonicalModel> {
-        if pdf_hash.len() != 64
-            || !pdf_hash
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
-            eros::bail!("PDF hash must be a lowercase SHA-256 digest")
-        }
-        let mut canonical = CanonicalModel::try_from(draft)?;
-        canonical.document.set_pdf_hash(pdf_hash.to_owned());
-        Ok(canonical)
+        CanonicalModel::try_from_with_pdf_hash(draft, pdf_hash)
     }
 }
 
@@ -396,6 +387,37 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(canonical.document.pdf_hash(), Some(hash.as_str()));
+    }
+
+    #[tokio::test]
+    async fn supplied_sha256_is_the_fallback_canonical_identifier() {
+        let service = TypeDbService::new(RecordingStore::default());
+        let hash = "b".repeat(64);
+        let mut draft = draft();
+        draft.bibliography.identifiers.clear();
+
+        let canonical = service
+            .pre_validate_with_pdf_hash(&draft, &hash)
+            .await
+            .unwrap();
+
+        assert_eq!(canonical.document.document_id(), format!("sha256:{hash}"));
+        assert_eq!(canonical.document.pdf_hash(), Some(hash.as_str()));
+        assert!(matches!(canonical.document, CanonicalDocument::Document(_)));
+    }
+
+    #[tokio::test]
+    async fn stable_identifier_takes_precedence_over_supplied_sha256() {
+        let service = TypeDbService::new(RecordingStore::default());
+        let hash = "c".repeat(64);
+
+        let canonical = service
+            .pre_validate_with_pdf_hash(&draft(), &hash)
+            .await
+            .unwrap();
+
+        assert_eq!(canonical.document.document_id(), "10.1234/canonical");
         assert_eq!(canonical.document.pdf_hash(), Some(hash.as_str()));
     }
 }

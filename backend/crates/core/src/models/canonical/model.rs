@@ -77,12 +77,11 @@ impl CanonicalDocument {
             Self::Book(_) => "book",
         }
     }
-}
 
-impl TryFrom<&TeiDocument> for CanonicalDocument {
-    type Error = eros::ErrorUnion;
-
-    fn try_from(draft: &TeiDocument) -> Result<Self, Self::Error> {
+    fn try_from_draft(
+        draft: &TeiDocument,
+        fallback_document_id: Option<String>,
+    ) -> eros::Result<Self> {
         let Some(title) = draft
             .bibliography
             .title
@@ -127,23 +126,50 @@ impl TryFrom<&TeiDocument> for CanonicalDocument {
             })
             .map(|identifier| identifier.value.trim())
             .find(|value| !value.is_empty())
+            .map(str::to_owned)
+            .or(fallback_document_id)
         else {
             eros::bail!("canonical document requires a stable document identifier")
         };
 
         Ok(Self::Document(Document {
-            document_id: document_id.to_owned(),
+            document_id,
             pdf_hash: None,
             title,
         }))
     }
 }
 
-impl TryFrom<&TeiDocument> for CanonicalModel {
+impl TryFrom<&TeiDocument> for CanonicalDocument {
     type Error = eros::ErrorUnion;
 
     fn try_from(draft: &TeiDocument) -> Result<Self, Self::Error> {
-        let document = CanonicalDocument::try_from(draft)?;
+        Self::try_from_draft(draft, None)
+    }
+}
+
+impl CanonicalModel {
+    /// Canonicalises a draft, using the exact PDF's SHA-256 as its identifier
+    /// only when the draft has no usable bibliographic identifier.
+    pub fn try_from_with_pdf_hash(draft: &TeiDocument, pdf_hash: &str) -> eros::Result<Self> {
+        if pdf_hash.len() != 64
+            || !pdf_hash
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            eros::bail!("PDF hash must be a lowercase SHA-256 digest")
+        }
+
+        let fallback_document_id = format!("sha256:{pdf_hash}");
+        let mut document = CanonicalDocument::try_from_draft(draft, Some(fallback_document_id))?;
+        document.set_pdf_hash(pdf_hash.to_owned());
+        Self::from_document_and_draft(document, draft)
+    }
+
+    fn from_document_and_draft(
+        document: CanonicalDocument,
+        draft: &TeiDocument,
+    ) -> eros::Result<Self> {
         if draft.bibliography.authors.is_empty() {
             eros::bail!("canonical document requires at least one contributor")
         }
@@ -194,6 +220,15 @@ impl TryFrom<&TeiDocument> for CanonicalModel {
             document,
             contributors,
         })
+    }
+}
+
+impl TryFrom<&TeiDocument> for CanonicalModel {
+    type Error = eros::ErrorUnion;
+
+    fn try_from(draft: &TeiDocument) -> Result<Self, Self::Error> {
+        let document = CanonicalDocument::try_from(draft)?;
+        Self::from_document_and_draft(document, draft)
     }
 }
 

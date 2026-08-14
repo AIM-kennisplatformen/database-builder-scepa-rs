@@ -4,7 +4,7 @@ use axum::{
     Json, Router,
     body::Bytes,
     extract::{DefaultBodyLimit, Path, State},
-    http::StatusCode,
+    http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -86,12 +86,44 @@ impl IntoResponse for ApiError {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/pdfs", post(upload_pdf))
+        .route("/pdfs/{pdf_hash}", get(download_pdf))
         .route("/pdfs/submissions/{workflow_id}", post(submit_pdf))
         .route("/drafts/{pdf_hash}", get(get_draft).put(publish_draft))
         .layer(DefaultBodyLimit::max(MAX_PDF_BYTES))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+async fn download_pdf(
+    State(state): State<AppState>,
+    Path(pdf_hash): Path<String>,
+) -> Result<Response, ApiError> {
+    let (metadata, pdf) = state
+        .pdfs
+        .load(&pdf_hash)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "PDF not found".into()))?;
+    let content_type = HeaderValue::from_str(&metadata.content_type).map_err(internal)?;
+    let content_disposition =
+        HeaderValue::from_str(&format!("inline; filename=\"{}.pdf\"", metadata.pdf_hash))
+            .map_err(internal)?;
+    let etag = HeaderValue::from_str(&format!("\"{}\"", metadata.pdf_hash)).map_err(internal)?;
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, content_type),
+            (header::CONTENT_DISPOSITION, content_disposition),
+            (
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("private, max-age=31536000, immutable"),
+            ),
+            (header::ETAG, etag),
+        ],
+        pdf,
+    )
+        .into_response())
 }
 
 async fn upload_pdf(
