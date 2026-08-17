@@ -1,0 +1,455 @@
+@startuml
+title Document workflows — grouped sequence overview
+
+
+
+hide footbox
+
+autonumber
+
+skinparam shadowing false
+
+skinparam sequence {
+
+  ArrowColor #444444
+
+  LifeLineBorderColor #777777
+
+  LifeLineBackgroundColor #FFFFFF
+
+  ParticipantBorderColor #555555
+
+  GroupBorderColor #777777
+
+  GroupBackgroundColor #FAFAFA
+
+  DividerBackgroundColor #F4F4F4
+
+  DividerBorderColor #777777
+
+}
+
+
+
+actor "User" as user
+
+
+
+box "Frontend" #EEE6FF
+
+  boundary "Frontend" as frontend
+
+end box
+
+box "Backend"
+
+  control "Upload API" as upload_api
+
+end box
+
+
+
+box "Restate Workflows" #E8F1FF
+
+  control "New Document" as new_workflow
+
+  control "Document Extraction" as extraction_workflow
+
+  control "Fix Document" as fix_workflow
+
+  control "Update Document" as update_workflow
+
+end box
+
+
+
+box "Restate Services" #FFF3D6
+
+  control "Garage Pipeline" as garage_service
+
+  control "GROBID Extraction Pipeline" as grobid_service
+
+  control "TEI Conversion Pipeline" as parsing_service
+
+  control "Artifact Store" as postgres_service
+
+  control "TypeDB Pipeline" as typedb_service
+
+end box
+
+
+
+box "External Containers" #EDEDED
+
+  database "Garage" as garage
+
+  participant "GROBID" as grobid
+
+  database "PostgreSQL" as postgres
+
+  database "TypeDB" as typedb
+
+end box
+
+
+
+legend bottom
+
+  Restate retries non-terminal service failures.
+
+  Selected failure outcomes are expanded below.
+
+endlegend
+
+
+
+== User Entry Points ==
+
+
+
+alt Start a new document
+
+  user -> frontend : Upload PDF
+
+  frontend -> upload_api : Forward PDF bytes
+
+  upload_api -> garage : Persist PDF
+
+  alt PDF storage fails
+
+    garage --> upload_api : Storage failure
+
+    upload_api --> frontend : Reject upload before workflow start
+
+    frontend --> user : Display upload error
+
+  else PDF storage succeeds
+
+    garage --> upload_api : PDF content hash
+
+    upload_api -> new_workflow : Start workflow with PDF hash
+
+  end
+
+else Update a published document
+
+  user -> frontend : Select a published document and edit its metadata
+
+  frontend -> update_workflow : Submit PDF hash and manual overrides
+
+else Repair a staged document
+
+  user -> frontend : Select a pending repair case and edit its draft
+
+  frontend -> fix_workflow : Submit case ID and manual overrides
+
+end
+
+
+
+== New Document Workflow ==
+
+
+
+note over new_workflow
+
+  This section expands the new-document entry shown above.
+
+end note
+
+
+
+note over upload_api, new_workflow
+
+  The PDF is durable in Garage before Restate starts.
+  The workflow request contains the PDF hash, not the PDF bytes.
+  New Document verifies the stored PDF metadata and links it to the workflow.
+
+end note
+
+new_workflow -> extraction_workflow : Run document extraction using the PDF hash
+
+alt Extraction pipeline succeeds
+
+   group GROBID Extraction Pipeline
+
+     extraction_workflow -> grobid_service : Request TEI extraction using the PDF hash
+
+     grobid_service -> garage_service : Load the PDF by content hash
+
+     garage_service -> garage : Read the PDF object
+
+     garage --> garage_service : PDF bytes
+
+     garage_service --> grobid_service : PDF bytes
+
+     grobid_service -> grobid : Submit the PDF for TEI extraction
+
+     grobid --> grobid_service : TEI XML
+
+     grobid_service --> extraction_workflow : TEI XML and validation warnings
+
+   end
+
+
+
+   group TEI Conversion Pipeline
+
+     extraction_workflow -> parsing_service : Convert TEI XML to document data
+
+     parsing_service --> extraction_workflow : Converted document data and validation warnings
+
+   end
+
+
+
+   extraction_workflow --> new_workflow : Extracted document data and validation warnings
+
+   note over extraction_workflow, postgres_service
+     On success, Document Extraction stores the TEI XML and draft in PostgreSQL.
+     Those persistence calls are not expanded in this fixed arrow layout.
+   end note
+
+   new_workflow -> update_workflow : Continue along the canonical publication path
+   note over new_workflow, update_workflow
+     This arrow shows shared publication responsibilities.
+     New Document performs them directly and does not invoke Update Document.
+   end note
+
+else Terminal PDF loading, GROBID extraction, or TEI conversion failure
+
+   note over garage_service, parsing_service
+
+     The pipeline service that classifies a failure as terminal
+
+     stages its failure record before propagating the error.
+
+   end note
+
+   extraction_workflow -> postgres_service : Stage the terminal failure for review
+
+   postgres_service -> postgres : Persist the review case and failure artifact
+
+   alt Failure staging fails
+
+     postgres --> postgres_service : Persistence failure
+
+     postgres_service --> extraction_workflow : Review case not persisted
+
+     extraction_workflow --> frontend : Extraction workflow failed
+
+     frontend --> user : Display extraction error
+
+   else Failure record is stored
+
+     postgres --> postgres_service : Review case stored
+
+     postgres_service --> extraction_workflow : Failure record persisted
+
+     extraction_workflow -> fix_workflow : Expose a pending repair case
+
+   end
+
+end
+
+
+
+== Fix Document Workflow ==
+
+
+
+note over fix_workflow
+
+  This section expands the repair entry shown above
+
+  and the pending case produced by a terminal pipeline failure.
+
+end note
+
+
+
+fix_workflow -> postgres_service : Load the pending review case and repair draft
+
+postgres_service -> postgres : Read the review case and draft
+
+alt Repair data retrieval fails
+
+  postgres --> postgres_service : Retrieval failure
+
+  postgres_service --> fix_workflow : Repair data unavailable
+
+  fix_workflow --> frontend : Repair cannot continue; staged data remains stored
+
+  frontend --> user : Display repair-loading error
+
+else Repair data is available
+
+  postgres --> postgres_service : Pending review case and draft
+
+  postgres_service --> fix_workflow : Repair context
+
+  fix_workflow --> frontend : Repair draft and canonical validation requirements
+
+  frontend --> user : Display the editable repair draft
+
+  loop Until the required canonical fields are supplied
+
+   user -> frontend : Supply a title and at least one named contributor
+
+  end
+
+  note over user, frontend
+
+   The frontend blocks submission while required canonical data is missing.
+
+  end note
+
+  frontend -> fix_workflow : Submit the case ID and manual overrides
+
+  fix_workflow -> update_workflow : Continue with PDF hash, overrides, and review-case reference
+
+end
+
+
+
+== Update Document Workflow ==
+
+
+
+note over update_workflow
+
+  This section expands direct updates and the handoff from Fix Document.
+
+  New Document performs the same publication responsibilities directly.
+
+end note
+
+
+
+update_workflow -> postgres_service : Load the source artifact and save the revised draft
+
+postgres_service -> postgres : Read the source artifact and write the draft
+
+alt Artifact preparation fails
+
+  postgres --> postgres_service : Artifact preparation failure
+
+  postgres_service --> update_workflow : Source unavailable or revised draft not persisted
+
+  update_workflow --> frontend : Update workflow failed
+
+  frontend --> user : Display artifact-preparation error
+
+else Revised draft is stored
+
+  postgres --> postgres_service : Source loaded and draft stored
+
+  postgres_service --> update_workflow : Success
+
+
+
+  update_workflow -> typedb_service : Publish the effective document data
+
+  note right of update_workflow
+
+   Update Document sends the effective new document and PDF hash.
+
+   For an existing publication, it also sends the old document.
+
+  end note
+
+
+
+  typedb_service -> postgres_service : Depend on the artifact state loaded by Update Document
+
+  postgres_service -> postgres : Read the draft and any published artifact
+
+  note over postgres_service, postgres
+
+   These arrows show a data dependency, not a direct service call.
+
+   Update Document loads the artifacts before calling the TypeDB Pipeline.
+
+  end note
+
+
+
+  alt Required artifact state is unavailable
+
+   postgres --> postgres_service : Retrieval failure
+
+   postgres_service --> typedb_service : Retrieval failed
+
+   typedb_service --> update_workflow : Publication cannot start
+
+   update_workflow --> frontend : Draft stored but canonical publication incomplete
+
+   frontend --> user : Display publication error
+
+  else Required artifact state is available
+
+   postgres --> postgres_service : Draft and any published artifact
+
+   postgres_service --> typedb_service : Effective new document and optional old document
+
+   typedb_service -> typedb : Insert canonical data or apply graph changes
+
+
+
+   alt TypeDB publication fails
+
+     typedb --> typedb_service : Publication failure
+
+     typedb_service --> update_workflow : Canonical publication failed
+
+     update_workflow --> frontend : Draft stored but canonical publication incomplete
+
+     frontend --> user : Display TypeDB publication error
+
+   else Canonical publication succeeds
+
+     typedb --> typedb_service : Success
+
+     note over typedb_service, postgres_service
+       This block shows post-publication finalization.
+       Update Document calls the Artifact Store after TypeDB returns.
+     end note
+
+
+
+     loop Retry transient finalization failures
+
+       typedb_service -> postgres_service : Finalize the published artifact and repair case
+
+       postgres_service -> postgres : Store the published artifact and resolve the repair case
+
+       alt Finalization fails
+
+         postgres --> postgres_service : Failure
+
+         postgres_service --> typedb_service : Retryable failure
+
+       else Finalization succeeds
+
+         postgres --> postgres_service : Success
+
+         postgres_service --> typedb_service : Success
+
+       end
+
+     end
+
+
+
+     typedb_service --> update_workflow : Success
+
+     update_workflow --> frontend : Publication completed
+
+     frontend --> user : Document ready
+
+   end
+
+  end
+
+end
+@enduml

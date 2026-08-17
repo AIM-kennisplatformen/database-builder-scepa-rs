@@ -1,8 +1,9 @@
 # SCEPA frontend
 
 React operator UI for the manual new-document workflow. A PDF is sent through
-automatic ingestion, then extracted and manual metadata are reviewed side by
-side before the canonical model is published.
+automatic ingestion and TypeDB publication. Valid artifacts continue into the
+shared update editor for optional corrections; invalid artifacts continue into
+the repair picker and then reuse that same editor.
 
 ```bash
 npm install

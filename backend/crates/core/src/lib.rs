@@ -1,6 +1,7 @@
 //! Core pipeline and persistence for SCEPA.
 
+pub mod document_upload;
 pub mod models;
-pub mod orchestration;
 pub mod pipeline;
 pub mod postgres;
+pub mod restate;
