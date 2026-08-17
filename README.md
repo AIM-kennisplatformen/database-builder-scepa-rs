@@ -20,6 +20,11 @@ all Rust crates live under `backend/`. This keeps its dependency and build
 configuration independent from the frontend toolchain that will be added under
 `frontend/`.
 
+HTTP handlers are transport adapters only. Uploads store PDF bytes in Garage
+before the API invokes `NewDocumentWorkflow` with the resulting hash. Other
+write endpoints invoke their typed workflow through the shared `RestateClient`;
+read endpoints query the relevant core persistence adapter directly.
+
 Run backend development commands from its workspace:
 
 ```bash
@@ -51,8 +56,9 @@ The stack exposes:
 ## API
 
 `POST /pdfs` submits a PDF to `NewDocumentWorkflow`, using its SHA-256 hash as
-the workflow identifier, and waits for extraction, validation, and TypeDB
-publication to complete.
+the workflow identifier, and waits for extraction, TypeDB export, and valid
+artifact persistence. The returned artifact then opens in the shared update
+flow for optional manual corrections.
 
 ```bash
 curl --request POST \
@@ -63,12 +69,17 @@ curl --request POST \
 
 `POST /pdfs/submissions/{workflow_id}` stores the PDF and starts the workflow
 without waiting for its result. The CLI uses this asynchronous route. A `202`
-response confirms durable acceptance; successful workflows subsequently publish
-to TypeDB, while pipeline failures are retained for operator review.
+response confirms durable acceptance; successful CLI submissions publish to
+TypeDB automatically, while extraction and canonical-validation failures are
+retained for operator repair.
 
 `GET /documents/requiring-fixing` returns every pending review case, newest
 first, including its document hash (when available), failed pipeline phase,
-error, artifact metadata, and retryability.
+error, artifact metadata, and retryability. `GET` and `PUT` on
+`/documents/requiring-fixing/{case_id}` load a repair draft and submit manually
+fixed data through `UpdateDocumentWorkflow`, respectively. External enrichment
+is represented by the repair contract but intentionally returns `501` until an
+enrichment service exists.
 
 ## Pipeline CLI
 

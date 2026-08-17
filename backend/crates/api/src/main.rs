@@ -5,18 +5,24 @@ use std::{env, error::Error, io, net::SocketAddr, time::Duration};
 use reqwest::Url;
 use restate_sdk::prelude::{Endpoint, HttpServer};
 use scepa::{
-    orchestration::{
-        DocumentExtractionWorkflow, DocumentRestateService, GarageRestateService,
-        NewDocumentIngressClient, NewDocumentWorkflow, PublishedArtifactRestateService,
-        TypeDbRestateService, UpdateDocumentIngressClient, UpdateDocumentWorkflow,
-    },
     pipeline::{
-        DocumentPipelineService,
         garage::{GarageClient, GaragePipelineService, PostgresPdfStore},
-        grobid::HttpGrobidClient,
+        grobid::{GrobidExtractionService, HttpGrobidClient},
+        tei::TeiConversionService,
         typedb::TypeDbService,
     },
     postgres::PostgresReviewStore,
+    restate::{
+        RestateClient,
+        services::{
+            ArtifactRestateService, GarageRestateService, GrobidRestateService, TeiRestateService,
+            TypeDbRestateService,
+        },
+        workflows::{
+            DocumentExtractionWorkflow, FixDocumentWorkflow, NewDocumentWorkflow,
+            UpdateDocumentWorkflow,
+        },
+    },
 };
 use serde::Serialize;
 use tokio::net::TcpListener;
@@ -59,10 +65,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         required("GARAGE_BUCKET")?,
         review_store.clone(),
     );
-    let document_pipeline = DocumentPipelineService::new(
+    let grobid_pipeline = GrobidExtractionService::new(
         HttpGrobidClient::new(http_client.clone(), required("GROBID_URL")?),
         review_store.clone(),
     );
+    let tei_pipeline = TeiConversionService::new(review_store.clone());
     let typedb = TypeDbService::connect(
         &required("TYPEDB_ADDRESS")?,
         required("TYPEDB_DATABASE")?,
@@ -74,15 +81,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let restate_endpoint = Endpoint::builder()
         .bind(GarageRestateService::new(garage_pipeline.clone()))
-        .bind(DocumentRestateService::new(
-            document_pipeline,
+        .bind(GrobidRestateService::new(
+            grobid_pipeline,
             garage_pipeline.clone(),
         ))
-        .bind(TypeDbRestateService::new(typedb.clone()))
-        .bind(PublishedArtifactRestateService::new(review_store.clone()))
+        .bind(TeiRestateService::new(tei_pipeline))
+        .bind(TypeDbRestateService::new(
+            typedb.clone(),
+            review_store.clone(),
+        ))
+        .bind(ArtifactRestateService::new(review_store.clone()))
         .bind(DocumentExtractionWorkflow)
         .bind(NewDocumentWorkflow)
         .bind(UpdateDocumentWorkflow)
+        .bind(FixDocumentWorkflow)
         .build();
     let restate_listener = TcpListener::bind(restate_endpoint_address).await?;
     tokio::spawn(HttpServer::new(restate_endpoint).serve(restate_listener));
@@ -91,11 +103,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let api_listener = TcpListener::bind(api_address).await?;
     let state = api::AppState::new(
-        NewDocumentIngressClient::new(&restate_ingress_url)?,
-        UpdateDocumentIngressClient::new(&restate_ingress_url)?,
+        RestateClient::new(&restate_ingress_url)?,
         garage_pipeline,
         review_store,
-        typedb,
     );
     tracing::info!(
         %api_address,

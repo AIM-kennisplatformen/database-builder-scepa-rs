@@ -1,10 +1,12 @@
 //! PostgreSQL persistence for pipeline failures requiring operator review.
 
 use async_trait::async_trait;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, postgres::PgPoolOptions};
 
-use crate::models::draft::{DraftDocument, ManualDocument};
+use crate::models::draft::{
+    Bibliography, DraftDocument, ManualDocument, PassageLevel, TeiDocument,
+};
 use crate::pipeline::{
     FailureDisposition, FailureRecord, ReviewStore, document::DocumentArtifactStore,
 };
@@ -48,7 +50,7 @@ pub struct PostgresReviewStore {
 }
 
 /// Review-case metadata returned by the operator API.
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+#[derive(Clone, Debug, Deserialize, Serialize, sqlx::FromRow)]
 pub struct ReviewCase {
     pub id: i64,
     pub workflow_id: String,
@@ -185,6 +187,22 @@ impl PostgresReviewStore {
             .map(serde_json::from_value)
             .transpose()
             .map_err(Into::into)
+    }
+
+    /// Loads the retained extraction or returns the empty extraction layer used
+    /// when an operator must reconstruct a failed document manually.
+    pub async fn get_repair_draft(&self, pdf_hash: &str) -> eros::Result<DraftDocument> {
+        if let Some(draft) = self.get_draft_document(pdf_hash).await? {
+            return Ok(draft);
+        }
+
+        Ok(DraftDocument::new(TeiDocument {
+            level: PassageLevel::Paragraph,
+            bibliography: Bibliography::default(),
+            body_text: Vec::new(),
+            figures_and_tables: Vec::new(),
+            references: Vec::new(),
+        }))
     }
 
     /// Replaces only the operator-authored layer of an existing draft.

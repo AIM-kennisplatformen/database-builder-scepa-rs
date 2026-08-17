@@ -80,7 +80,7 @@ type UploadResult = {
     warnings: unknown[];
   };
 };
-type WorkflowKind = "new" | "update";
+type WorkflowKind = "new" | "update" | "repair";
 type PublishedDocumentSummary = {
   pdf_hash: string;
   title?: string | null;
@@ -92,6 +92,20 @@ type PublishedDocument = {
   artifact: Draft;
   published_at: string;
 };
+type ReviewCase = {
+  id: number;
+  workflow_id: string;
+  pdf_hash?: string | null;
+  service: string;
+  phase: string;
+  retryable: boolean;
+  error_message: string;
+  artifact_content_type: string;
+  artifact_size: number;
+  status: string;
+  created_at: string;
+};
+type RepairDraft = { case: ReviewCase; draft: Draft & { pdf_hash: string } };
 
 const API = import.meta.env.VITE_API_URL || "/api";
 
@@ -113,16 +127,16 @@ function Glyph({ name, size = 18 }: { name: string; size?: number }) {
 }
 
 const workflows = [
-  { key: "new" as const, icon: "file", title: "New document", detail: "Manual review", enabled: true },
+  { key: "new" as const, icon: "file", title: "New document", detail: "Automatic publication", enabled: true },
   { key: "update" as const, icon: "refresh", title: "Update document", detail: "Published documents", enabled: true },
-  { key: "repair" as const, icon: "tool", title: "Fix failed ingestion", detail: "Coming later", enabled: false },
+  { key: "repair" as const, icon: "tool", title: "Fix failed ingestion", detail: "Staged documents", enabled: true },
 ];
 
 function Sidebar({ selected, onSelect }: { selected: WorkflowKind; onSelect: (workflow: WorkflowKind) => void }) {
   return <aside className="sidebar">
     <div className="brand"><div className="brand-mark"><span>S</span></div><div><strong>SCEPA</strong><small>Knowledge operations</small></div></div>
     <div className="side-label">Workflows</div>
-    <nav>{workflows.map((flow) => <button className={`workflow ${flow.enabled && flow.key === selected ? "active" : ""} ${!flow.enabled ? "disabled" : ""}`} key={flow.title} disabled={!flow.enabled} onClick={() => flow.enabled && flow.key !== "repair" && onSelect(flow.key)}>
+    <nav>{workflows.map((flow) => <button className={`workflow ${flow.enabled && flow.key === selected ? "active" : ""} ${!flow.enabled ? "disabled" : ""}`} key={flow.title} disabled={!flow.enabled} onClick={() => flow.enabled && onSelect(flow.key)}>
       <span className="workflow-icon"><Glyph name={flow.icon}/></span><span><strong>{flow.title}</strong><small>{flow.detail}</small></span>{flow.enabled ? <Glyph name="chevron" size={16}/> : <span className="later">Later</span>}
     </button>)}</nav>
     <div className="sidebar-note"><Glyph name="database"/><div><strong>Canonical graph</strong><span>Manual values always take precedence over extracted metadata.</span></div></div>
@@ -131,10 +145,20 @@ function Sidebar({ selected, onSelect }: { selected: WorkflowKind; onSelect: (wo
 }
 
 function Steps({ current, workflow }: { current: number; workflow: WorkflowKind }) {
-  const labels = workflow === "new" ? ["Upload PDF", "Review extraction", "Publish"] : ["Choose document", "Review information", "Publish update"];
+  const labels = workflow === "new" ? ["Upload PDF", "Review extraction", "Publish"] : workflow === "update" ? ["Choose document", "Review information", "Publish update"] : ["Choose staged document", "Enter required data", "Save fixed document"];
   return <div className="steps">{labels.map((label, index) => <div className={`step ${index < current ? "done" : index === current ? "current" : ""}`} key={label}>
     <span>{index < current ? <Glyph name="check" size={14}/> : index + 1}</span><strong>{label}</strong>{index < 2 && <i/>}
   </div>)}</div>;
+}
+
+function RepairTable({ cases, loading, error, onSelect }: { cases: ReviewCase[]; loading: boolean; error: string; onSelect: (reviewCase: ReviewCase) => void }) {
+  return <div className="document-list-card">
+    <div className="eyebrow"><Glyph name="tool" size={15}/> FIX STAGED DOCUMENT</div>
+    <h1>Select a document requiring review</h1>
+    <p className="lede">These documents could not finish automatic ingestion. Supply the data required by the canonical graph to publish them.</p>
+    {error && <div className="error-box">{error}</div>}
+    {loading ? <div className="document-list-state"><span className="spinner"/><span>Loading staged documents…</span></div> : cases.length === 0 ? <div className="document-list-state"><Glyph name="check" size={28}/><strong>No documents require fixing</strong><span>The review queue is clear.</span></div> : <div className="document-table-wrap"><table className="document-table repair-table"><thead><tr><th>Failure</th><th>Pipeline stage</th><th>Staged</th><th/></tr></thead><tbody>{cases.map((reviewCase) => <tr className={!reviewCase.pdf_hash ? "unavailable" : ""} key={reviewCase.id} onClick={() => reviewCase.pdf_hash && onSelect(reviewCase)}><td><strong>{reviewCase.error_message}</strong><small>{reviewCase.pdf_hash ? `${reviewCase.pdf_hash.slice(0, 12)}…` : "Source PDF unavailable"}</small></td><td><span className="failure-stage">{reviewCase.service} · {reviewCase.phase.replaceAll("_", " ")}</span></td><td>{new Date(reviewCase.created_at).toLocaleDateString()}</td><td><button disabled={!reviewCase.pdf_hash} aria-label="Fix staged document"><Glyph name="chevron" size={16}/></button></td></tr>)}</tbody></table></div>}
+  </div>;
 }
 
 const identifierKind = (identifier: Identifier) => typeof identifier.kind === "string" ? identifier.kind : identifier.kind.other;
@@ -156,7 +180,7 @@ function UploadPanel({ onSelect, busy, error }: { onSelect: (file: File) => void
   return <div className="stage-card upload-stage">
     <div className="eyebrow"><Glyph name="sparkle" size={15}/> NEW DOCUMENT · AUTOMATIC</div>
     <h1>Start with the source document</h1>
-    <p className="lede">Upload a PDF. SCEPA validates and publishes successful extractions automatically; failed documents are retained for review.</p>
+    <p className="lede">Upload a PDF. SCEPA extracts and publishes valid documents automatically, then opens the saved artifact for optional updates. Invalid artifacts are retained for repair.</p>
     <label className={`dropzone ${dragging ? "dragging" : ""} ${busy ? "busy" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={drop}>
       <input type="file" accept="application/pdf,.pdf" disabled={busy} onChange={(e) => accept(e.target.files)}/>
       <span className="upload-icon">{busy ? <span className="spinner"/> : <Glyph name="upload" size={28}/>}</span>
@@ -165,7 +189,7 @@ function UploadPanel({ onSelect, busy, error }: { onSelect: (file: File) => void
       {!busy && <span className="browse">Choose PDF</span>}
     </label>
     {error && <div className="error-box">{error}</div>}
-    <div className="pipeline-hint"><span><i>1</i> Store source</span><Glyph name="arrow" size={15}/><span><i>2</i> Extract &amp; validate</span><Glyph name="arrow" size={15}/><span><i>3</i> Publish graph</span></div>
+    <div className="pipeline-hint"><span><i>1</i> Extract &amp; parse</span><Glyph name="arrow" size={15}/><span><i>2</i> Export to TypeDB</span><Glyph name="arrow" size={15}/><span><i>3</i> Save artifact</span></div>
   </div>;
 }
 
@@ -373,7 +397,7 @@ function Identifiers({ extracted, value, onChange }: { extracted: Identifier[]; 
   </section>;
 }
 
-function Review({ draft, hash, file, workflow, onPublished, onReset }: { draft: Draft; hash: string; file?: File; workflow: WorkflowKind; onPublished: (canonical: unknown) => void; onReset: () => void }) {
+function Review({ draft, hash, file, workflow, repairCaseId, onPublished, onReset }: { draft: Draft; hash: string; file?: File; workflow: WorkflowKind; repairCaseId?: number; onPublished: (canonical: unknown) => void; onReset: () => void }) {
   const extracted = draft.grobid_extraction_data;
   const b = extracted.bibliography;
   const [manual, setManual] = useState<ManualBibliography>(draft.manual_data.bibliography || {});
@@ -385,21 +409,28 @@ function Review({ draft, hash, file, workflow, onPublished, onReset }: { draft: 
   const abstractPassages = manual.abstract_text ?? b.abstract_text ?? [];
   const bodyPassages = manualBody ?? extracted.body_text;
   const overrideCount = Object.keys(manual).length + (manualBody === undefined ? 0 : 1);
+  const effectiveTitle = (manual.title !== undefined ? manual.title : b.title)?.trim();
+  const effectiveAuthors = manual.authors !== undefined ? manual.authors : b.authors;
+  const invalidReason = !effectiveTitle ? "A title is required." : !effectiveAuthors?.length ? "At least one contributor is required." : effectiveAuthors.some((author) => !(author.name || author.forename || author.surname)?.trim()) ? "Every contributor needs a name." : "";
   const artifact = useMemo(() => ({ pdf_hash: hash, grobid_extraction_data: extracted, manual_data: { bibliography: manual, ...(manualBody === undefined ? {} : { body_text: manualBody }) } }), [hash, extracted, manual, manualBody]);
   const setPassages = (abstracts: AbstractPassage[], body: Passage[]) => { set("abstract_text", abstracts); setManualBody(body); };
   const resetPassages = () => { set("abstract_text", undefined); setManualBody(undefined); };
   const publish = async () => {
+    if (invalidReason) { setError(invalidReason); return; }
     setSaving(true); setError("");
     try {
-      const endpoint = workflow === "new" ? `${API}/drafts/${hash}` : `${API}/documents/${hash}`;
-      const response = await fetch(endpoint, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ bibliography: manual, ...(manualBody === undefined ? {} : { body_text: manualBody }) }) });
+      const manualData = { bibliography: manual, ...(manualBody === undefined ? {} : { body_text: manualBody }) };
+      const endpoint = workflow === "new" ? `${API}/drafts/${hash}` : workflow === "update" ? `${API}/documents/${hash}` : `${API}/documents/requiring-fixing/${repairCaseId}`;
+      const body = workflow === "repair" ? { manual_data: manualData, enrich: false } : manualData;
+      const response = await fetch(endpoint, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       if (!response.ok) throw new Error((await response.text()) || `Publish failed (${response.status})`);
       const result = await response.json(); onPublished(result.canonical);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not publish the document"); }
     finally { setSaving(false); }
   };
+  const isRepair = workflow === "repair";
   return <div className="review-page">
-    <div className="review-head"><div><button className="back" onClick={onReset}>← {workflow === "new" ? "Start over" : "Back to documents"}</button><div className="eyebrow"><Glyph name="sparkle" size={15}/> {workflow === "new" ? "EXTRACTION COMPLETE" : "PUBLISHED DOCUMENT"}</div><h1>{workflow === "new" ? "Review document metadata" : "Update document information"}</h1><p>Check extracted and manual information, then change only what needs updating.</p></div><div className="document-chip"><span className="pdf-icon">PDF</span><div><strong>{file?.name || b.title || "Published document.pdf"}</strong><small>{file ? `${(file.size / 1024 / 1024).toFixed(1)} MB` : hash.slice(0, 12)} · {workflow === "new" ? "Extraction complete" : "Published"}</small></div><span className="success-dot"><Glyph name="check" size={14}/></span></div></div>
+    <div className="review-head"><div><button className="back" onClick={onReset}>← {workflow === "new" ? "Start over" : workflow === "update" ? "Back to documents" : "Back to staged documents"}</button><div className="eyebrow"><Glyph name={isRepair ? "tool" : "sparkle"} size={15}/> {workflow === "new" ? "EXTRACTION COMPLETE" : workflow === "update" ? "PUBLISHED DOCUMENT" : "MANUAL REPAIR"}</div><h1>{workflow === "new" ? "Review document metadata" : workflow === "update" ? "Update document information" : "Enter required document data"}</h1><p>{isRepair ? "Complete at least the title and one named contributor. The PDF hash supplies a stable fallback identifier." : "Check extracted and manual information, then change only what needs updating."}</p></div><div className="document-chip"><span className="pdf-icon">PDF</span><div><strong>{file?.name || b.title || (isRepair ? "Staged document.pdf" : "Published document.pdf")}</strong><small>{file ? `${(file.size / 1024 / 1024).toFixed(1)} MB` : hash.slice(0, 12)} · {workflow === "new" ? "Extraction complete" : workflow === "update" ? "Published" : "Requires fixing"}</small></div><span className={isRepair ? "failure-dot" : "success-dot"}>{isRepair ? <Glyph name="tool" size={14}/> : <Glyph name="check" size={14}/>}</span></div></div>
     <SourceReview fileName={file?.name || "Uploaded document.pdf"} pdfHash={hash} bodyPassages={bodyPassages} abstractPassages={abstractPassages} edited={passageEdited} onChange={setPassages} onReset={resetPassages}/>
     <div className="rule-banner"><div className="rule-icon"><Glyph name="arrow"/></div><div><strong>Manual values have priority</strong><p>The extracted value always stays visible. When you add an override, the extracted value is marked as excluded from canonical data.</p></div><span>{overrideCount} override{overrideCount === 1 ? "" : "s"}</span></div>
     <div className="review-card"><div className="card-heading"><div><span>01</span><div><h2>Publication details</h2><p>Core metadata used to identify the document.</p></div></div><div className="legend"><span><i className="blue"/> Extracted</span><span><i className="orange"/> Manual</span></div></div>
@@ -409,13 +440,14 @@ function Review({ draft, hash, file, workflow, onPublished, onReset }: { draft: 
     </div>
     <div className="review-card"><div className="card-heading"><div><span>02</span><div><h2>People & identifiers</h2><p>Canonical identity and contribution records.</p></div></div></div><Contributors extracted={b.authors || []} value={manual.authors} onChange={(v) => set("authors", v)}/><Identifiers extracted={b.identifiers || []} value={manual.identifiers} onChange={(v) => set("identifiers", v)}/></div>
     <div className="review-card extraction-summary"><div className="card-heading"><div><span>03</span><div><h2>Extraction retained</h2><p>The original extraction stays attached while reviewed passages are stored as overrides.</p></div></div></div><div className="stats"><div><strong>{bodyPassages.length}</strong><span>Reviewed body passages</span></div><div><strong>{abstractPassages.length}</strong><span>Reviewed abstracts</span></div><div><strong>{extracted.figures_and_tables.length}</strong><span>Figures & tables</span></div></div><details><summary>Preview stored artifact</summary><pre>{JSON.stringify(artifact, null, 2)}</pre></details></div>
+    {isRepair && <div className="review-card enrichment-card"><div><span className="workflow-icon"><Glyph name="sparkle"/></span><div><h2>External enrichment</h2><p>Enrichment with external APIs is planned and is not yet available.</p></div></div><label><input type="checkbox" disabled/> Enrich before saving <span>Planned</span></label></div>}
     {error && <div className="error-box sticky-error">{error}</div>}
-    <div className="publish-bar"><div><Glyph name="database"/><p><strong>Ready to {workflow === "new" ? "publish" : "update"}</strong><span>{overrideCount ? `${overrideCount} manual override${overrideCount === 1 ? "" : "s"} will be applied` : "All extracted values will be used"}</span></p></div><button className="primary" disabled={saving} onClick={publish}>{saving ? <span className="spinner small"/> : <Glyph name="arrow"/>}{saving ? "Publishing…" : workflow === "new" ? "Publish to canonical graph" : "Update canonical graph"}</button></div>
+    <div className="publish-bar"><div><Glyph name="database"/><p><strong>{invalidReason || `Ready to ${workflow === "new" ? "publish" : workflow === "update" ? "update" : "save fixed document"}`}</strong><span>{invalidReason ? "Complete the required fields before continuing" : overrideCount ? `${overrideCount} manual override${overrideCount === 1 ? "" : "s"} will be applied` : "All extracted values will be used"}</span></p></div><button className="primary" disabled={saving || Boolean(invalidReason)} title={invalidReason || undefined} onClick={publish}>{saving ? <span className="spinner small"/> : <Glyph name="arrow"/>}{saving ? "Publishing…" : workflow === "new" ? "Publish to canonical graph" : workflow === "update" ? "Update canonical graph" : "Save fixed document"}</button></div>
   </div>;
 }
 
 function Complete({ canonical, workflow, onReset }: { canonical: unknown; workflow: WorkflowKind; onReset: () => void }) {
-  return <div className="stage-card complete"><span className="complete-icon"><Glyph name="check" size={34}/></span><div className="eyebrow">{workflow === "new" ? "PUBLISHED" : "UPDATED"} SUCCESSFULLY</div><h1>{workflow === "new" ? "Document added to the graph" : "Document updated in the graph"}</h1><p className="lede">{workflow === "new" ? "The canonical model was built from the extraction plus your manual overrides." : "Only changed graph sections were deleted from the old artifact and inserted from the new artifact."}</p><div className="complete-actions"><button className="primary" onClick={onReset}><Glyph name={workflow === "new" ? "plus" : "refresh"}/> {workflow === "new" ? "Ingest another document" : "Update another document"}</button></div><details><summary>View canonical response</summary><pre>{JSON.stringify(canonical, null, 2)}</pre></details></div>;
+  return <div className="stage-card complete"><span className="complete-icon"><Glyph name="check" size={34}/></span><div className="eyebrow">{workflow === "new" ? "PUBLISHED" : workflow === "update" ? "UPDATED" : "FIXED"} SUCCESSFULLY</div><h1>{workflow === "new" ? "Document added to the graph" : workflow === "update" ? "Document updated in the graph" : "Staged document published"}</h1><p className="lede">{workflow === "new" ? "The canonical model was built from the extraction plus your manual overrides." : workflow === "update" ? "Only changed graph sections were deleted from the old artifact and inserted from the new artifact." : "The manual data passed validation, reached the canonical graph, and the review case was resolved."}</p><div className="complete-actions"><button className="primary" onClick={onReset}><Glyph name={workflow === "new" ? "plus" : workflow === "update" ? "refresh" : "tool"}/> {workflow === "new" ? "Ingest another document" : workflow === "update" ? "Update another document" : "Fix another document"}</button></div><details><summary>View canonical response</summary><pre>{JSON.stringify(canonical, null, 2)}</pre></details></div>;
 }
 
 export default function App() {
@@ -424,13 +456,15 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [documents, setDocuments] = useState<PublishedDocumentSummary[]>([]);
+  const [reviewCases, setReviewCases] = useState<ReviewCase[]>([]);
+  const [repairCaseId, setRepairCaseId] = useState<number>();
   const [file, setFile] = useState<File>();
   const [draft, setDraft] = useState<Draft>();
   const [hash, setHash] = useState("");
   const [canonical, setCanonical] = useState<unknown>();
-  const reset = () => { setStage(workflow === "new" ? "upload" : "list"); setFile(undefined); setDraft(undefined); setHash(""); setError(""); setCanonical(undefined); };
+  const reset = () => { setStage(workflow === "new" ? "upload" : "list"); setFile(undefined); setDraft(undefined); setHash(""); setRepairCaseId(undefined); setError(""); setCanonical(undefined); };
   const selectWorkflow = (next: WorkflowKind) => {
-    setWorkflow(next); setStage(next === "new" ? "upload" : "list"); setFile(undefined); setDraft(undefined); setHash(""); setError(""); setCanonical(undefined);
+    setWorkflow(next); setStage(next === "new" ? "upload" : "list"); setFile(undefined); setDraft(undefined); setHash(""); setRepairCaseId(undefined); setError(""); setCanonical(undefined);
   };
   useEffect(() => {
     if (workflow !== "update" || stage !== "list") return;
@@ -440,6 +474,16 @@ export default function App() {
       if (!response.ok) throw new Error((await response.text()) || `Could not load documents (${response.status})`);
       return response.json() as Promise<PublishedDocumentSummary[]>;
     }).then((rows) => { if (!disposed) setDocuments(rows); }).catch((cause) => { if (!disposed) setError(cause instanceof Error ? cause.message : "Could not load published documents"); }).finally(() => { if (!disposed) setBusy(false); });
+    return () => { disposed = true; };
+  }, [workflow, stage]);
+  useEffect(() => {
+    if (workflow !== "repair" || stage !== "list") return;
+    let disposed = false;
+    setBusy(true);
+    fetch(`${API}/documents/requiring-fixing`).then(async (response) => {
+      if (!response.ok) throw new Error((await response.text()) || `Could not load staged documents (${response.status})`);
+      return response.json() as Promise<ReviewCase[]>;
+    }).then((rows) => { if (!disposed) setReviewCases(rows); }).catch((cause) => { if (!disposed) setError(cause instanceof Error ? cause.message : "Could not load staged documents"); }).finally(() => { if (!disposed) setBusy(false); });
     return () => { disposed = true; };
   }, [workflow, stage]);
   const openDocument = async (document: PublishedDocumentSummary) => {
@@ -452,17 +496,35 @@ export default function App() {
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load the document"); }
     finally { setBusy(false); }
   };
+  const openRepairCase = async (reviewCase: ReviewCase) => {
+    setBusy(true); setError("");
+    try {
+      const response = await fetch(`${API}/documents/requiring-fixing/${reviewCase.id}`);
+      if (!response.ok) throw new Error((await response.text()) || `Could not load staged document (${response.status})`);
+      const payload: RepairDraft = await response.json();
+      setDraft(payload.draft); setHash(payload.draft.pdf_hash); setRepairCaseId(payload.case.id); setStage("review");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load the staged document"); }
+    finally { setBusy(false); }
+  };
   const upload = async (selected: File) => {
     if (selected.type !== "application/pdf" && !selected.name.toLowerCase().endsWith(".pdf")) { setError("Please choose a PDF document."); return; }
     setFile(selected); setBusy(true); setError("");
+    let published = false;
     try {
       const response = await fetch(`${API}/pdfs`, { method: "POST", headers: { "content-type": "application/pdf" }, body: selected });
       if (!response.ok) throw new Error((await response.text()) || `Ingestion failed (${response.status})`);
       const payload: UploadResult = await response.json();
-      setHash(payload.result.stored_pdf.pdf_hash); setCanonical(payload.result.canonical); setStage("complete");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "The ingestion pipeline failed."); }
+      published = true;
+      const artifactResponse = await fetch(`${API}/documents/${encodeURIComponent(payload.result.stored_pdf.pdf_hash)}`);
+      if (!artifactResponse.ok) throw new Error((await artifactResponse.text()) || `Could not retrieve the saved artifact (${artifactResponse.status})`);
+      const saved: PublishedDocument = await artifactResponse.json();
+      setWorkflow("update"); setHash(saved.pdf_hash); setDraft(saved.artifact); setCanonical(payload.result.canonical); setStage("review");
+    } catch (cause) {
+      setWorkflow(published ? "update" : "repair"); setStage("list");
+      setError(`${published ? "The document was published, but its saved artifact could not be retrieved." : "The new-document workflow failed and retained the document for repair."} ${cause instanceof Error ? cause.message : ""}`.trim());
+    }
     finally { setBusy(false); }
   };
   const current = stage === "upload" || stage === "list" ? 0 : stage === "review" ? 1 : 3;
-  return <div className="app-shell"><Sidebar selected={workflow} onSelect={selectWorkflow}/><main><header className="topbar"><div><span>Document operations</span><i>/</i><strong>{workflow === "new" ? "New document" : "Update document"}</strong></div><span className="environment"><i/> Pipeline online</span></header><div className="workspace"><Steps current={current} workflow={workflow}/>{stage === "upload" && <UploadPanel onSelect={upload} busy={busy} error={error}/>} {stage === "list" && <DocumentTable documents={documents} loading={busy} error={error} onSelect={openDocument}/>} {stage === "review" && draft && <Review draft={draft} hash={hash} file={file} workflow={workflow} onReset={reset} onPublished={(model) => { setCanonical(model); setStage("complete"); }}/>} {stage === "complete" && <Complete canonical={canonical} workflow={workflow} onReset={reset}/>}</div></main></div>;
+  return <div className="app-shell"><Sidebar selected={workflow} onSelect={selectWorkflow}/><main><header className="topbar"><div><span>Document operations</span><i>/</i><strong>{workflow === "new" ? "New document" : workflow === "update" ? "Update document" : "Fix staged document"}</strong></div><span className="environment"><i/> Pipeline online</span></header><div className="workspace"><Steps current={current} workflow={workflow}/>{stage === "upload" && <UploadPanel onSelect={upload} busy={busy} error={error}/>} {stage === "list" && workflow === "update" && <DocumentTable documents={documents} loading={busy} error={error} onSelect={openDocument}/>} {stage === "list" && workflow === "repair" && <RepairTable cases={reviewCases} loading={busy} error={error} onSelect={openRepairCase}/>} {stage === "review" && draft && <Review draft={draft} hash={hash} file={file} workflow={workflow} repairCaseId={repairCaseId} onReset={reset} onPublished={(model) => { setCanonical(model); setStage("complete"); }}/>} {stage === "complete" && <Complete canonical={canonical} workflow={workflow} onReset={reset}/>}</div></main></div>;
 }

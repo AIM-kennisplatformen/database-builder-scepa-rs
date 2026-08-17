@@ -1,0 +1,47 @@
+include:
+  - compose.yaml
+
+services:
+  typedb-mcp:
+    image: typedb/typedb-mcp:latest
+    command:
+      - --typedb-address
+      - http://typedb:8000
+      - --typedb-username
+      - ${TYPEDB_USERNAME:-admin}
+      - --typedb-password
+      - ${TYPEDB_PASSWORD:-password}
+    ports:
+      - "${TYPEDB_MCP_PORT:-8001}:8001"
+    depends_on:
+      typedb:
+        condition: service_healthy
+    restart: unless-stopped
+
+  sonarqube:
+    image: sonarqube:latest
+    environment:
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+    ports:
+      - "${SONARQUBE_PORT:-9000}:9000"
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl --noproxy '*' --fail --silent http://localhost:9000/api/system/status
+          | grep --quiet '"status":"UP"'
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    stop_grace_period: 1h
+    restart: unless-stopped
+
+volumes:
+  sonarqube_data:
+  sonarqube_extensions:
+  sonarqube_logs:
