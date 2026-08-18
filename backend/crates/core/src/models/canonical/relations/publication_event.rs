@@ -1,27 +1,19 @@
 //! The abstract `publication_event` relation and its descendants.
 
-use chrono::NaiveDateTime;
 use std::sync::Arc;
 
-#[typetag::serde(tag = "type")]
-pub trait TPublisher: Send + Sync {
-    fn organization_id(&self) -> &str;
-}
-#[typetag::serde(tag = "type")]
-pub trait TPublicationVenue: Send + Sync {
-    fn venue_id(&self) -> &str;
-}
-#[typetag::serde(tag = "type")]
-pub trait TWork: Send + Sync {
-    fn document_id(&self) -> &str;
-}
+use chrono::NaiveDateTime;
+use enum_dispatch::enum_dispatch;
 
-/// Common roles and attributes of every publication event.
-#[typetag::serde(tag = "type")]
+use crate::models::canonical::entities::{
+    document::EDocument, organization::EOrganization, publication_venue::EPublicationVenue,
+};
+
+#[enum_dispatch]
 pub trait TPublicationEvent: Send + Sync {
-    fn publisher(&self) -> Option<&Arc<dyn TPublisher>>;
-    fn venue(&self) -> Option<&Arc<dyn TPublicationVenue>>;
-    fn work(&self) -> &Arc<dyn TWork>;
+    fn publisher(&self) -> Option<&EOrganization>;
+    fn venue(&self) -> Option<&EPublicationVenue>;
+    fn work(&self) -> &EDocument;
     fn publication_date(&self) -> NaiveDateTime;
     fn publication_notes(&self) -> &[String];
     fn version_number(&self) -> Option<&str> {
@@ -32,29 +24,31 @@ pub trait TPublicationEvent: Send + Sync {
 
 pub trait TSubmission: TPublicationEvent {}
 
-#[derive(serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct Submission {
-    pub publisher: Option<Arc<dyn TPublisher>>,
-    pub venue: Option<Arc<dyn TPublicationVenue>>,
-    pub work: Arc<dyn TWork>,
+    pub publisher: Option<Arc<EOrganization>>,
+    pub venue: Option<Arc<EPublicationVenue>>,
+    pub work: Arc<EDocument>,
+    #[schema(value_type = String, format = DateTime)]
     pub publication_date: NaiveDateTime,
     pub publication_notes: Vec<String>,
 }
 
 impl TSubmission for Submission {}
-#[typetag::serde(name = "submission")]
 impl TPublicationEvent for Submission {
-    fn publisher(&self) -> Option<&Arc<dyn TPublisher>> {
-        self.publisher.as_ref()
+    fn publisher(&self) -> Option<&EOrganization> {
+        self.publisher.as_deref()
     }
 
-    fn venue(&self) -> Option<&Arc<dyn TPublicationVenue>> {
-        self.venue.as_ref()
+    fn venue(&self) -> Option<&EPublicationVenue> {
+        self.venue.as_deref()
     }
 
-    fn work(&self) -> &Arc<dyn TWork> {
-        &self.work
+    fn work(&self) -> &EDocument {
+        self.work.as_ref()
     }
 
     fn publication_date(&self) -> NaiveDateTime {
@@ -72,29 +66,31 @@ impl TPublicationEvent for Submission {
 
 pub trait TAcceptance: TPublicationEvent {}
 
-#[derive(serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct Acceptance {
-    pub publisher: Option<Arc<dyn TPublisher>>,
-    pub venue: Option<Arc<dyn TPublicationVenue>>,
-    pub work: Arc<dyn TWork>,
+    pub publisher: Option<Arc<EOrganization>>,
+    pub venue: Option<Arc<EPublicationVenue>>,
+    pub work: Arc<EDocument>,
+    #[schema(value_type = String, format = DateTime)]
     pub publication_date: NaiveDateTime,
     pub publication_notes: Vec<String>,
 }
 
 impl TAcceptance for Acceptance {}
-#[typetag::serde(name = "acceptance")]
 impl TPublicationEvent for Acceptance {
-    fn publisher(&self) -> Option<&Arc<dyn TPublisher>> {
-        self.publisher.as_ref()
+    fn publisher(&self) -> Option<&EOrganization> {
+        self.publisher.as_deref()
     }
 
-    fn venue(&self) -> Option<&Arc<dyn TPublicationVenue>> {
-        self.venue.as_ref()
+    fn venue(&self) -> Option<&EPublicationVenue> {
+        self.venue.as_deref()
     }
 
-    fn work(&self) -> &Arc<dyn TWork> {
-        &self.work
+    fn work(&self) -> &EDocument {
+        self.work.as_ref()
     }
 
     fn publication_date(&self) -> NaiveDateTime {
@@ -114,12 +110,15 @@ pub trait TPublication: TPublicationEvent {
     fn version_number(&self) -> Option<&str>;
 }
 
-#[derive(serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct Publication {
-    pub publisher: Option<Arc<dyn TPublisher>>,
-    pub venue: Option<Arc<dyn TPublicationVenue>>,
-    pub work: Arc<dyn TWork>,
+    pub publisher: Option<Arc<EOrganization>>,
+    pub venue: Option<Arc<EPublicationVenue>>,
+    pub work: Arc<EDocument>,
+    #[schema(value_type = String, format = DateTime)]
     pub publication_date: NaiveDateTime,
     pub publication_notes: Vec<String>,
     pub version_number: Option<String>,
@@ -130,18 +129,18 @@ impl TPublication for Publication {
         self.version_number.as_deref()
     }
 }
-#[typetag::serde(name = "publication")]
+
 impl TPublicationEvent for Publication {
-    fn publisher(&self) -> Option<&Arc<dyn TPublisher>> {
-        self.publisher.as_ref()
+    fn publisher(&self) -> Option<&EOrganization> {
+        self.publisher.as_deref()
     }
 
-    fn venue(&self) -> Option<&Arc<dyn TPublicationVenue>> {
-        self.venue.as_ref()
+    fn venue(&self) -> Option<&EPublicationVenue> {
+        self.venue.as_deref()
     }
 
-    fn work(&self) -> &Arc<dyn TWork> {
-        &self.work
+    fn work(&self) -> &EDocument {
+        self.work.as_ref()
     }
 
     fn publication_date(&self) -> NaiveDateTime {
@@ -159,4 +158,13 @@ impl TPublicationEvent for Publication {
     fn relation_type(&self) -> &'static str {
         "publication"
     }
+}
+
+#[enum_dispatch(TPublicationEvent)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EPublicationEvent {
+    Submission,
+    Acceptance,
+    Publication,
 }

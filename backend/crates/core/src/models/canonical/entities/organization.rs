@@ -1,7 +1,11 @@
-use crate::models::canonical::relations::{affiliation, contribution, publication_event};
+use enum_dispatch::enum_dispatch;
 use std::sync::Arc;
 
-#[typetag::serde(tag = "type")]
+use crate::models::canonical::relations::{
+    affiliation::EAffiliation, contribution::EContribution, publication_event::EPublicationEvent,
+};
+
+#[enum_dispatch]
 pub trait TOrganization: Send + Sync {
     fn organization_id(&self) -> &str;
     fn organization_name(&self) -> &str;
@@ -9,7 +13,9 @@ pub trait TOrganization: Send + Sync {
     fn entity_type(&self) -> &'static str;
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct Organization {
     pub organization_id: String,
@@ -20,12 +26,11 @@ pub struct Organization {
 #[derive(bon::Builder)]
 pub struct AOrganization {
     pub organization: Organization,
-    pub contributions: Vec<Arc<dyn contribution::TContribution>>,
-    pub affiliations: Vec<Arc<dyn affiliation::TAffiliation>>,
-    pub publication_events: Vec<Arc<dyn publication_event::TPublicationEvent>>,
+    pub contributions: Vec<Arc<EContribution>>,
+    pub affiliations: Vec<Arc<EAffiliation>>,
+    pub publication_events: Vec<Arc<EPublicationEvent>>,
 }
 
-#[typetag::serde(name = "organization")]
 impl TOrganization for Organization {
     fn organization_id(&self) -> &str {
         &self.organization_id
@@ -46,7 +51,9 @@ impl TOrganization for Organization {
 
 pub trait TInstitution: TOrganization {}
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct Institution {
     pub organization_id: String,
@@ -57,12 +64,11 @@ pub struct Institution {
 #[derive(bon::Builder)]
 pub struct AInstitution {
     pub institution: Institution,
-    pub contributions: Vec<Arc<dyn contribution::TContribution>>,
-    pub affiliations: Vec<Arc<dyn affiliation::TAffiliation>>,
-    pub publication_events: Vec<Arc<dyn publication_event::TPublicationEvent>>,
+    pub contributions: Vec<Arc<EContribution>>,
+    pub affiliations: Vec<Arc<EAffiliation>>,
+    pub publication_events: Vec<Arc<EPublicationEvent>>,
 }
 
-#[typetag::serde(name = "institution")]
 impl TOrganization for Institution {
     fn organization_id(&self) -> &str {
         &self.organization_id
@@ -84,7 +90,9 @@ impl TInstitution for Institution {}
 
 pub trait TGovernmentInstitution: TInstitution {}
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct GovernmentInstitution {
     pub organization_id: String,
@@ -95,12 +103,11 @@ pub struct GovernmentInstitution {
 #[derive(bon::Builder)]
 pub struct AGovernmentInstitution {
     pub government_institution: GovernmentInstitution,
-    pub contributions: Vec<Arc<dyn contribution::TContribution>>,
-    pub affiliations: Vec<Arc<dyn affiliation::TAffiliation>>,
-    pub publication_events: Vec<Arc<dyn publication_event::TPublicationEvent>>,
+    pub contributions: Vec<Arc<EContribution>>,
+    pub affiliations: Vec<Arc<EAffiliation>>,
+    pub publication_events: Vec<Arc<EPublicationEvent>>,
 }
 
-#[typetag::serde(name = "government_institution")]
 impl TOrganization for GovernmentInstitution {
     fn organization_id(&self) -> &str {
         &self.organization_id
@@ -123,7 +130,9 @@ impl TGovernmentInstitution for GovernmentInstitution {}
 
 pub trait TEducationalInstitution: TInstitution {}
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct EducationalInstitution {
     pub organization_id: String,
@@ -134,12 +143,11 @@ pub struct EducationalInstitution {
 #[derive(bon::Builder)]
 pub struct AEducationalInstitution {
     pub educational_institution: EducationalInstitution,
-    pub contributions: Vec<Arc<dyn contribution::TContribution>>,
-    pub affiliations: Vec<Arc<dyn affiliation::TAffiliation>>,
-    pub publication_events: Vec<Arc<dyn publication_event::TPublicationEvent>>,
+    pub contributions: Vec<Arc<EContribution>>,
+    pub affiliations: Vec<Arc<EAffiliation>>,
+    pub publication_events: Vec<Arc<EPublicationEvent>>,
 }
 
-#[typetag::serde(name = "educational_institution")]
 impl TOrganization for EducationalInstitution {
     fn organization_id(&self) -> &str {
         &self.organization_id
@@ -162,7 +170,9 @@ impl TEducationalInstitution for EducationalInstitution {}
 
 pub trait TNonprofitInstitution: TInstitution {}
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct NonprofitInstitution {
     pub organization_id: String,
@@ -173,12 +183,11 @@ pub struct NonprofitInstitution {
 #[derive(bon::Builder)]
 pub struct ANonprofitInstitution {
     pub nonprofit_institution: NonprofitInstitution,
-    pub contributions: Vec<Arc<dyn contribution::TContribution>>,
-    pub affiliations: Vec<Arc<dyn affiliation::TAffiliation>>,
-    pub publication_events: Vec<Arc<dyn publication_event::TPublicationEvent>>,
+    pub contributions: Vec<Arc<EContribution>>,
+    pub affiliations: Vec<Arc<EAffiliation>>,
+    pub publication_events: Vec<Arc<EPublicationEvent>>,
 }
 
-#[typetag::serde(name = "nonprofit_institution")]
 impl TOrganization for NonprofitInstitution {
     fn organization_id(&self) -> &str {
         &self.organization_id
@@ -201,7 +210,9 @@ impl TNonprofitInstitution for NonprofitInstitution {}
 
 pub trait TPublisher: TOrganization {}
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct Publisher {
     pub organization_id: String,
@@ -212,12 +223,11 @@ pub struct Publisher {
 #[derive(bon::Builder)]
 pub struct APublisher {
     pub publisher: Publisher,
-    pub contributions: Vec<Arc<dyn contribution::TContribution>>,
-    pub affiliations: Vec<Arc<dyn affiliation::TAffiliation>>,
-    pub publication_events: Vec<Arc<dyn publication_event::TPublicationEvent>>,
+    pub contributions: Vec<Arc<EContribution>>,
+    pub affiliations: Vec<Arc<EAffiliation>>,
+    pub publication_events: Vec<Arc<EPublicationEvent>>,
 }
 
-#[typetag::serde(name = "publisher")]
 impl TOrganization for Publisher {
     fn organization_id(&self) -> &str {
         &self.organization_id
@@ -237,38 +247,14 @@ impl TOrganization for Publisher {
 }
 impl TPublisher for Publisher {}
 
-macro_rules! impl_organization_roles {
-    ($type:ty, $name:literal) => {
-        #[typetag::serde(name = $name)]
-        impl affiliation::TOrganization for $type {
-            fn organization_id(&self) -> &str {
-                TOrganization::organization_id(self)
-            }
-        }
-
-        #[typetag::serde(name = $name)]
-        impl publication_event::TPublisher for $type {
-            fn organization_id(&self) -> &str {
-                TOrganization::organization_id(self)
-            }
-        }
-
-        #[typetag::serde(name = $name)]
-        impl contribution::TContributor for $type {
-            fn contributor_id(&self) -> &str {
-                TOrganization::organization_id(self)
-            }
-
-            fn contributor_kind(&self) -> contribution::ContributorKind {
-                contribution::ContributorKind::Organization
-            }
-        }
-    };
+#[enum_dispatch(TOrganization)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EOrganization {
+    Organization,
+    Institution,
+    GovernmentInstitution,
+    EducationalInstitution,
+    NonprofitInstitution,
+    Publisher,
 }
-
-impl_organization_roles!(Organization, "organization");
-impl_organization_roles!(Institution, "institution");
-impl_organization_roles!(GovernmentInstitution, "government_institution");
-impl_organization_roles!(EducationalInstitution, "educational_institution");
-impl_organization_roles!(NonprofitInstitution, "nonprofit_institution");
-impl_organization_roles!(Publisher, "publisher");

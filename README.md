@@ -55,6 +55,11 @@ The stack exposes:
 
 ## API
 
+The API generates an OpenAPI 3.1 document from its handler annotations. With
+the service running, download it from `http://localhost:3000/openapi.json` for
+client generation, validation, or documentation tooling, or browse the
+interactive Swagger UI at `http://localhost:3000/swagger-ui/`.
+
 `POST /pdfs` submits a PDF to `NewDocumentWorkflow`, using its SHA-256 hash as
 the workflow identifier, and waits for extraction, TypeDB export, and valid
 artifact persistence. The returned artifact then opens in the shared update

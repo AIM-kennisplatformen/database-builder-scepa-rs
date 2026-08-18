@@ -1,8 +1,12 @@
-use crate::models::canonical::relations::{affiliation, contribution, publication_event};
+use enum_dispatch::enum_dispatch;
 use nonempty_collections::NEVec;
 use std::sync::Arc;
 
-#[typetag::serde(tag = "type")]
+use crate::models::canonical::relations::{
+    affiliation::EAffiliation, contribution::EContribution, publication_event::EPublicationEvent,
+};
+
+#[enum_dispatch]
 pub trait TDocument: Send + Sync {
     fn document_id(&self) -> &str;
     fn pdf_hash(&self) -> Option<&str>;
@@ -16,7 +20,9 @@ pub trait TDocument: Send + Sync {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct Document {
     pub document_id: String,
@@ -27,12 +33,11 @@ pub struct Document {
 #[derive(bon::Builder)]
 pub struct ADocument {
     pub document: Document,
-    pub contributions: NEVec<Arc<dyn contribution::TContribution>>,
-    pub publication_events: Vec<Arc<dyn publication_event::TPublicationEvent>>,
-    pub affiliations: Vec<Arc<dyn affiliation::TAffiliation>>,
+    pub contributions: NEVec<Arc<EContribution>>,
+    pub publication_events: Vec<Arc<EPublicationEvent>>,
+    pub affiliations: Vec<Arc<EAffiliation>>,
 }
 
-#[typetag::serde(name = "document")]
 impl TDocument for Document {
     fn document_id(&self) -> &str {
         &self.document_id
@@ -55,7 +60,9 @@ pub trait TResearchPaper: TDocument {
     fn doi(&self) -> Option<&str>;
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct ResearchPaper {
     pub document_id: String,
@@ -67,12 +74,11 @@ pub struct ResearchPaper {
 #[derive(bon::Builder)]
 pub struct AResearchPaper {
     pub research_paper: ResearchPaper,
-    pub contributions: NEVec<Arc<dyn contribution::TContribution>>,
-    pub publication_events: Vec<Arc<dyn publication_event::TPublicationEvent>>,
-    pub affiliations: Vec<Arc<dyn affiliation::TAffiliation>>,
+    pub contributions: NEVec<Arc<EContribution>>,
+    pub publication_events: Vec<Arc<EPublicationEvent>>,
+    pub affiliations: Vec<Arc<EAffiliation>>,
 }
 
-#[typetag::serde(name = "research_paper")]
 impl TDocument for ResearchPaper {
     fn document_id(&self) -> &str {
         &self.document_id
@@ -104,7 +110,9 @@ pub trait TBook: TDocument {
     fn isbn(&self) -> Option<&str>;
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct Book {
     pub document_id: String,
@@ -116,12 +124,11 @@ pub struct Book {
 #[derive(bon::Builder)]
 pub struct ABook {
     pub book: Book,
-    pub contributions: NEVec<Arc<dyn contribution::TContribution>>,
-    pub publication_events: Vec<Arc<dyn publication_event::TPublicationEvent>>,
-    pub affiliations: Vec<Arc<dyn affiliation::TAffiliation>>,
+    pub contributions: NEVec<Arc<EContribution>>,
+    pub publication_events: Vec<Arc<EPublicationEvent>>,
+    pub affiliations: Vec<Arc<EAffiliation>>,
 }
 
-#[typetag::serde(name = "book")]
 impl TDocument for Book {
     fn document_id(&self) -> &str {
         &self.document_id
@@ -151,7 +158,9 @@ impl TBook for Book {
 
 pub trait TReport: TDocument {}
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct Report {
     pub document_id: String,
@@ -162,12 +171,11 @@ pub struct Report {
 #[derive(bon::Builder)]
 pub struct AReport {
     pub report: Report,
-    pub contributions: NEVec<Arc<dyn contribution::TContribution>>,
-    pub publication_events: Vec<Arc<dyn publication_event::TPublicationEvent>>,
-    pub affiliations: Vec<Arc<dyn affiliation::TAffiliation>>,
+    pub contributions: NEVec<Arc<EContribution>>,
+    pub publication_events: Vec<Arc<EPublicationEvent>>,
+    pub affiliations: Vec<Arc<EAffiliation>>,
 }
 
-#[typetag::serde(name = "report")]
 impl TDocument for Report {
     fn document_id(&self) -> &str {
         &self.document_id
@@ -187,32 +195,12 @@ impl TDocument for Report {
 }
 impl TReport for Report {}
 
-macro_rules! impl_document_roles {
-    ($type:ty, $name:literal) => {
-        #[typetag::serde(name = $name)]
-        impl contribution::TWork for $type {
-            fn document_id(&self) -> &str {
-                TDocument::document_id(self)
-            }
-        }
-
-        #[typetag::serde(name = $name)]
-        impl publication_event::TWork for $type {
-            fn document_id(&self) -> &str {
-                TDocument::document_id(self)
-            }
-        }
-
-        #[typetag::serde(name = $name)]
-        impl affiliation::TEvidence for $type {
-            fn document_id(&self) -> &str {
-                TDocument::document_id(self)
-            }
-        }
-    };
+#[enum_dispatch(TDocument)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EDocument {
+    Document,
+    ResearchPaper,
+    Book,
+    Report,
 }
-
-impl_document_roles!(Document, "document");
-impl_document_roles!(ResearchPaper, "research_paper");
-impl_document_roles!(Book, "book");
-impl_document_roles!(Report, "report");

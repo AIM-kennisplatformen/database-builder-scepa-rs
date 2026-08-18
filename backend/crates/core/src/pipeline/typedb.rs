@@ -13,8 +13,10 @@ use crate::models::{
     draft::TeiDocument,
 };
 use entities::{
-    document::TDocument, organization::TOrganization, person::TPerson,
-    publication_venue::TPublicationVenue,
+    document::{EDocument, TDocument},
+    organization::{EOrganization, TOrganization},
+    person::TPerson,
+    publication_venue::{EPublicationVenue, TPublicationVenue},
 };
 use relations::{
     affiliation::TAffiliation,
@@ -37,7 +39,9 @@ pub trait CanonicalDocumentStore: Send + Sync {
 }
 
 /// The graph sections touched by one update transaction.
-#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema,
+)]
 pub struct CanonicalUpdateSummary {
     pub document_changed: bool,
     pub contributors_deleted: usize,
@@ -356,7 +360,7 @@ pub type TypedbService<S> = TypeDbService<S>;
 /// Product-capitalised spelling of [`TypeDbService`].
 pub type TypeDBService<S> = TypeDbService<S>;
 
-fn document_insert_query(document: &Arc<dyn TDocument>) -> eros::Result<(String, GivenRows)> {
+fn document_insert_query(document: &Arc<EDocument>) -> eros::Result<(String, GivenRows)> {
     let mut variables = vec!["document_id".to_owned(), "title".to_owned()];
     let mut declarations = vec!["$document_id: string", "$title: string"];
     let mut attributes = vec![
@@ -615,7 +619,7 @@ fn publication_event_insert_query(
     Ok((query, rows))
 }
 
-fn document_delete_query(document: &Arc<dyn TDocument>) -> eros::Result<(String, GivenRows)> {
+fn document_delete_query(document: &Arc<EDocument>) -> eros::Result<(String, GivenRows)> {
     let mut rows = GivenRows::new(vec!["document_id".to_owned()], 1);
     rows.push_row(vec![document.document_id().to_owned().into()])?;
     Ok((
@@ -625,7 +629,7 @@ fn document_delete_query(document: &Arc<dyn TDocument>) -> eros::Result<(String,
 }
 
 fn document_relation_delete_query(
-    document: &Arc<dyn TDocument>,
+    document: &Arc<EDocument>,
     relation_type: &str,
     role: &str,
 ) -> eros::Result<(String, GivenRows)> {
@@ -642,7 +646,7 @@ fn document_relation_delete_query(
 }
 
 fn organization_delete_query(
-    organization: &Arc<dyn TOrganization>,
+    organization: &Arc<EOrganization>,
 ) -> eros::Result<(String, GivenRows)> {
     let mut rows = GivenRows::new(vec!["organization_id".to_owned()], 1);
     rows.push_row(vec![organization.organization_id().to_owned().into()])?;
@@ -656,7 +660,7 @@ fn organization_delete_query(
 }
 
 fn publication_venue_delete_query(
-    venue: &Arc<dyn TPublicationVenue>,
+    venue: &Arc<EPublicationVenue>,
 ) -> eros::Result<(String, GivenRows)> {
     let mut rows = GivenRows::new(vec!["venue_id".to_owned()], 1);
     rows.push_row(vec![venue.venue_id().to_owned().into()])?;
@@ -668,14 +672,14 @@ fn publication_venue_delete_query(
     ))
 }
 
-fn document_value(document: &Arc<dyn TDocument>) -> Option<serde_json::Value> {
+fn document_value(document: &Arc<EDocument>) -> Option<serde_json::Value> {
     serde_json::to_value(document).ok()
 }
 
 #[cfg(test)]
 fn document_title_update_query(
-    old: &Arc<dyn TDocument>,
-    new: &Arc<dyn TDocument>,
+    old: &Arc<EDocument>,
+    new: &Arc<EDocument>,
 ) -> eros::Result<(String, GivenRows)> {
     let mut rows = GivenRows::new(
         vec![
