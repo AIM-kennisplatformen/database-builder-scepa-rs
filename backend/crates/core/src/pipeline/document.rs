@@ -23,7 +23,7 @@ pub trait DocumentArtifactStore: Send + Sync {
 }
 
 /// Warning emitted by either stage of the composite document pipeline.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "stage", content = "warning", rename_all = "snake_case")]
 pub enum DocumentPipelineWarning {
     Grobid(GrobidValidationWarning),

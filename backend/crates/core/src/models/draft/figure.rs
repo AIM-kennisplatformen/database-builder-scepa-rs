@@ -2,14 +2,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::draft::passage::BoundingBox;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FigureOrTable {
     Figure(Figure),
     Table(Table),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 #[builder(on(String, into))]
 pub struct Figure {
     pub id: String,
@@ -20,7 +20,7 @@ pub struct Figure {
     pub coordinates: Vec<BoundingBox>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 #[builder(on(String, into))]
 pub struct Table {
     pub id: String,
@@ -32,7 +32,7 @@ pub struct Table {
     pub content: Option<TableContent>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 pub struct TableContent {
     pub headers: Vec<String>,
     pub rows: Vec<Vec<String>>,

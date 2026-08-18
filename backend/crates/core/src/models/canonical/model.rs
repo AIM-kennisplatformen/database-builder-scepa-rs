@@ -1,6 +1,6 @@
 //! Root canonical graph and conversion from the extraction draft.
 
-use std::{collections::HashMap, fmt, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime};
 use nonempty_collections::NEVec;
@@ -8,65 +8,43 @@ use sha2::{Digest, Sha256};
 
 use super::{
     entities::{
-        document::{Book, Document, ResearchPaper, TDocument},
-        organization::{Organization, Publisher, TOrganization},
-        person::{Person, TPerson},
-        publication_venue::{Journal, TPublicationVenue},
+        document::{Book, Document, EDocument, ResearchPaper, TDocument},
+        organization::{EOrganization, Organization, Publisher},
+        person::{EPerson, Person},
+        publication_venue::{EPublicationVenue, Journal},
     },
     relations::{
-        affiliation::{self, Affiliation, TAffiliation},
-        contribution::{self, Authorship, Contribution, TContribution},
-        publication_event::{self, Publication, TPublicationEvent},
+        affiliation::{Affiliation, EAffiliation},
+        contribution::{Authorship, Contribution, EContribution, EContributor},
+        publication_event::{EPublicationEvent, Publication},
     },
 };
 use crate::models::draft::{ContributorRole, Identifier, IdentifierKind, TeiDocument};
 
 /// A canonical object graph whose nodes and relations map directly to the TypeDB schema.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 pub struct CanonicalModel {
-    pub document: Arc<dyn TDocument>,
-    pub persons: Vec<Arc<dyn TPerson>>,
-    pub organizations: Vec<Arc<dyn TOrganization>>,
-    pub publication_venues: Vec<Arc<dyn TPublicationVenue>>,
-    pub contributions: Vec<Arc<dyn TContribution>>,
-    pub affiliations: Vec<Arc<dyn TAffiliation>>,
-    pub publication_events: Vec<Arc<dyn TPublicationEvent>>,
-}
-
-impl fmt::Debug for CanonicalModel {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match serde_json::to_value(self) {
-            Ok(value) => formatter
-                .debug_tuple("CanonicalModel")
-                .field(&value)
-                .finish(),
-            Err(_) => formatter.write_str("CanonicalModel(<serialization failed>)"),
-        }
-    }
-}
-
-impl PartialEq for CanonicalModel {
-    fn eq(&self, other: &Self) -> bool {
-        serde_json::to_value(self).ok() == serde_json::to_value(other).ok()
-    }
+    pub document: Arc<EDocument>,
+    pub persons: Vec<Arc<EPerson>>,
+    pub organizations: Vec<Arc<EOrganization>>,
+    pub publication_venues: Vec<Arc<EPublicationVenue>>,
+    pub contributions: Vec<Arc<EContribution>>,
+    pub affiliations: Vec<Arc<EAffiliation>>,
+    pub publication_events: Vec<Arc<EPublicationEvent>>,
 }
 
 struct DocumentNode {
-    entity: Arc<dyn TDocument>,
-    contribution_work: Arc<dyn contribution::TWork>,
-    publication_work: Arc<dyn publication_event::TWork>,
-    evidence: Arc<dyn affiliation::TEvidence>,
+    entity: Arc<EDocument>,
+    contribution_work: Arc<EDocument>,
+    publication_work: Arc<EDocument>,
+    evidence: Arc<EDocument>,
 }
 
 fn document_node<T>(document: T) -> DocumentNode
 where
-    T: TDocument
-        + contribution::TWork
-        + publication_event::TWork
-        + affiliation::TEvidence
-        + 'static,
+    T: Into<EDocument>,
 {
-    let document = Arc::new(document);
+    let document = Arc::new(document.into());
     DocumentNode {
         entity: document.clone(),
         contribution_work: document.clone(),
@@ -76,20 +54,16 @@ where
 }
 
 struct OrganizationNode {
-    entity: Arc<dyn TOrganization>,
-    affiliation: Arc<dyn affiliation::TOrganization>,
-    publisher: Arc<dyn publication_event::TPublisher>,
+    entity: Arc<EOrganization>,
+    affiliation: Arc<EOrganization>,
+    publisher: Arc<EOrganization>,
 }
 
 fn organization_node<T>(organization: T) -> OrganizationNode
 where
-    T: TOrganization
-        + affiliation::TOrganization
-        + publication_event::TPublisher
-        + contribution::TContributor
-        + 'static,
+    T: Into<EOrganization>,
 {
-    let organization = Arc::new(organization);
+    let organization = Arc::new(organization.into());
     OrganizationNode {
         entity: organization.clone(),
         affiliation: organization.clone(),
@@ -98,15 +72,15 @@ where
 }
 
 struct VenueNode {
-    entity: Arc<dyn TPublicationVenue>,
-    publication_venue: Arc<dyn publication_event::TPublicationVenue>,
+    entity: Arc<EPublicationVenue>,
+    publication_venue: Arc<EPublicationVenue>,
 }
 
 fn venue_node<T>(venue: T) -> VenueNode
 where
-    T: TPublicationVenue + publication_event::TPublicationVenue + 'static,
+    T: Into<EPublicationVenue>,
 {
-    let venue = Arc::new(venue);
+    let venue = Arc::new(venue.into());
     VenueNode {
         entity: venue.clone(),
         publication_venue: venue,
@@ -139,9 +113,9 @@ impl CanonicalModel {
             eros::bail!("canonical document requires at least one contributor")
         }
 
-        let mut persons: Vec<Arc<dyn TPerson>> = Vec::new();
-        let mut person_affiliates: Vec<Arc<dyn affiliation::TPerson>> = Vec::new();
-        let mut contributions: Vec<Arc<dyn TContribution>> = Vec::new();
+        let mut persons: Vec<Arc<EPerson>> = Vec::new();
+        let mut person_affiliates: Vec<Arc<EPerson>> = Vec::new();
+        let mut contributions: Vec<Arc<EContribution>> = Vec::new();
 
         for (index, contributor) in draft.bibliography.authors.iter().enumerate() {
             let given_name = contributor
@@ -165,7 +139,7 @@ impl CanonicalModel {
                 eros::bail!("canonical contributor {} requires a name", index + 1)
             }
 
-            let person = Arc::new(Person {
+            let person = Arc::new(EPerson::from(Person {
                 person_id: format!(
                     "{}:contributor:{}",
                     document.entity.document_id(),
@@ -173,27 +147,26 @@ impl CanonicalModel {
                 ),
                 given_name,
                 family_name,
-            });
-            let contributor_role: Arc<dyn contribution::TContributor> = person.clone();
-            let relation: Arc<dyn TContribution> = match contributor.role {
-                ContributorRole::Author => Arc::new(Authorship {
+            }));
+            let contributor_role = Arc::new(EContributor::Person(person.clone()));
+            let relation = match contributor.role {
+                ContributorRole::Author => Arc::new(EContribution::from(Authorship {
                     contributor: contributor_role.clone(),
                     work: document.contribution_work.clone(),
-                }),
-                ContributorRole::Editor => Arc::new(Contribution {
+                })),
+                ContributorRole::Editor => Arc::new(EContribution::from(Contribution {
                     contributor: contributor_role.clone(),
                     work: document.contribution_work.clone(),
-                }),
+                })),
             };
             persons.push(person.clone());
             person_affiliates.push(person);
             contributions.push(relation);
         }
 
-        let mut organizations: Vec<Arc<dyn TOrganization>> = Vec::new();
-        let mut affiliation_organizations: HashMap<String, Arc<dyn affiliation::TOrganization>> =
-            HashMap::new();
-        let mut affiliations: Vec<Arc<dyn TAffiliation>> = Vec::new();
+        let mut organizations: Vec<Arc<EOrganization>> = Vec::new();
+        let mut affiliation_organizations: HashMap<String, Arc<EOrganization>> = HashMap::new();
+        let mut affiliations: Vec<Arc<EAffiliation>> = Vec::new();
 
         for (source, person) in draft.bibliography.authors.iter().zip(&person_affiliates) {
             let Some(organization_name) = non_empty(source.affiliation.as_deref()) else {
@@ -218,15 +191,15 @@ impl CanonicalModel {
                     affiliation_organizations.insert(normalized_name, node.affiliation.clone());
                     node.affiliation
                 };
-            affiliations.push(Arc::new(Affiliation {
+            affiliations.push(Arc::new(EAffiliation::from(Affiliation {
                 person: person.clone(),
                 organization,
                 evidence: NEVec::new(document.evidence.clone()),
-            }));
+            })));
         }
 
-        let mut publication_venues: Vec<Arc<dyn TPublicationVenue>> = Vec::new();
-        let mut publication_events: Vec<Arc<dyn TPublicationEvent>> = Vec::new();
+        let mut publication_venues: Vec<Arc<EPublicationVenue>> = Vec::new();
+        let mut publication_events: Vec<Arc<EPublicationEvent>> = Vec::new();
         if let Some(publication_date) = publication_datetime(draft) {
             let publisher = non_empty(draft.bibliography.publisher.as_deref()).map(|name| {
                 let node = organization_node(Publisher {
@@ -257,14 +230,14 @@ impl CanonicalModel {
                 publication_venues.push(node.entity);
                 node.publication_venue
             });
-            publication_events.push(Arc::new(Publication {
+            publication_events.push(Arc::new(EPublicationEvent::from(Publication {
                 publisher,
                 venue,
                 work: document.publication_work.clone(),
                 publication_date,
                 publication_notes: Vec::new(),
                 version_number: None,
-            }));
+            })));
         }
 
         Ok(Self {
@@ -397,6 +370,10 @@ fn publication_datetime(draft: &TeiDocument) -> Option<NaiveDateTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::canonical::{
+        entities::{organization::TOrganization, person::TPerson},
+        relations::{affiliation::TAffiliation, contribution::TContribution},
+    };
     use crate::models::draft::{Bibliography, Contributor, IdentifierScope, PassageLevel};
 
     fn draft(title: Option<&str>, identifiers: Vec<Identifier>) -> TeiDocument {
@@ -459,7 +436,7 @@ mod tests {
     }
 
     #[test]
-    fn canonical_graph_round_trips_through_typetag() {
+    fn canonical_graph_round_trips_through_enums() {
         let mut draft = draft(
             Some("A paper"),
             vec![
@@ -473,8 +450,15 @@ mod tests {
         draft.bibliography.publication_date = Some("2024-05-06".into());
         let canonical = CanonicalModel::try_from(&draft).unwrap();
 
-        let json = serde_json::to_string(&canonical).unwrap();
-        let decoded: CanonicalModel = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_value(&canonical).unwrap();
+        assert_eq!(json["document"]["type"], "research_paper");
+        assert_eq!(json["persons"][0]["type"], "person");
+        assert_eq!(json["organizations"][0]["type"], "organization");
+        assert_eq!(json["publication_venues"][0]["type"], "journal");
+        assert_eq!(json["contributions"][0]["type"], "authorship");
+        assert_eq!(json["affiliations"][0]["type"], "affiliation");
+        assert_eq!(json["publication_events"][0]["type"], "publication");
+        let decoded: CanonicalModel = serde_json::from_value(json).unwrap();
 
         assert_eq!(decoded, canonical);
         assert_eq!(decoded.organizations.len(), 2);

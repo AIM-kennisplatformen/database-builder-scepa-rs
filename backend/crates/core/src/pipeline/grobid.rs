@@ -96,7 +96,7 @@ pub struct GrobidExtractionService<C, S> {
 }
 
 /// Non-fatal findings emitted while validating a Grobid response.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GrobidValidationWarning {
     /// The extracted TEI does not contain a title element.

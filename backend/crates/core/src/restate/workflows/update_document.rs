@@ -28,7 +28,7 @@ pub struct ReviewCaseReference {
     pub workflow_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct UpdateDocumentWorkflowResponse {
     pub artifact: DraftDocument,
     pub canonical: CanonicalModel,

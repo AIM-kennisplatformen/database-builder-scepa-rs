@@ -1,22 +1,19 @@
-use crate::models::canonical::relations::{affiliation, contribution};
+use enum_dispatch::enum_dispatch;
 use nonempty_collections::NEVec;
 use std::sync::Arc;
 
-#[typetag::serde(tag = "type")]
+use crate::models::canonical::relations::{affiliation::EAffiliation, contribution::EContribution};
+
+#[enum_dispatch]
 pub trait TPerson: Send + Sync {
     fn person_id(&self) -> &str;
     fn given_name(&self) -> Option<&str>;
     fn family_name(&self) -> Option<&str>;
 }
 
-#[typetag::serde(name = "person")]
-impl affiliation::TPerson for Person {
-    fn person_id(&self) -> &str {
-        &self.person_id
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct Person {
     pub person_id: String,
@@ -27,21 +24,10 @@ pub struct Person {
 #[derive(bon::Builder)]
 pub struct APerson {
     pub person: Person,
-    pub contributions: NEVec<Arc<dyn contribution::TContribution>>,
-    pub affiliations: Vec<Arc<dyn affiliation::TAffiliation>>,
+    pub contributions: NEVec<Arc<EContribution>>,
+    pub affiliations: Vec<Arc<EAffiliation>>,
 }
 
-#[typetag::serde(name = "person")]
-impl contribution::TContributor for Person {
-    fn contributor_id(&self) -> &str {
-        &self.person_id
-    }
-
-    fn contributor_kind(&self) -> contribution::ContributorKind {
-        contribution::ContributorKind::Person
-    }
-}
-#[typetag::serde(name = "person")]
 impl TPerson for Person {
     fn person_id(&self) -> &str {
         &self.person_id
@@ -54,4 +40,11 @@ impl TPerson for Person {
     fn family_name(&self) -> Option<&str> {
         self.family_name.as_deref()
     }
+}
+
+#[enum_dispatch(TPerson)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EPerson {
+    Person,
 }

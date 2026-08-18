@@ -18,7 +18,7 @@ pub struct NewDocumentWorkflowRequest {
     pub pdf_hash: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct NewDocumentWorkflowResponse {
     pub stored_pdf: StoredPdf,
     pub draft: DraftDocument,

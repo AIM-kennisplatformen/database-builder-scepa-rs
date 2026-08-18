@@ -8,7 +8,7 @@ use crate::models::draft::{
 };
 
 /// Whether prose was segmented into paragraphs or sentences by the TEI producer.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PassageLevel {
     Paragraph,
@@ -16,7 +16,7 @@ pub enum PassageLevel {
 }
 
 /// A complete application-facing representation of a TEI document.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 pub struct TeiDocument {
     pub level: PassageLevel,
     pub bibliography: Bibliography,
@@ -29,7 +29,7 @@ pub struct TeiDocument {
 ///
 /// The serialized field names intentionally describe the persisted artifact,
 /// while the Rust names describe how the values are used in the application.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct DraftDocument {
     #[serde(rename = "grobid_extraction_data")]
     pub extracted_data: TeiDocument,
@@ -92,7 +92,7 @@ impl DraftDocument {
 /// Besides metadata, operators can correct the abstract/body classification and
 /// the text or source coordinates of passages. The extracted layer remains
 /// immutable; populated passage fields replace it only in the effective view.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(default)]
 pub struct ManualDocument {
     pub bibliography: ManualBibliography,
@@ -102,7 +102,7 @@ pub struct ManualDocument {
 
 /// Sparse bibliography patch. `None` means “use the extracted value”; for
 /// collections, `Some(vec![])` intentionally replaces extraction with no rows.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(default)]
 pub struct ManualBibliography {
     #[serde(skip_serializing_if = "Option::is_none")]

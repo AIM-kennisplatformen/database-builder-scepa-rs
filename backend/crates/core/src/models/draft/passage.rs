@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 /// Prose and formulae retain their distinction in the serialized output.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Passage {
     Text(TextPassage),
     Formula(FormulaPassage),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 #[builder(on(String, into))]
 pub struct TextPassage {
     pub id: String,
@@ -19,7 +19,7 @@ pub struct TextPassage {
     pub section: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 #[builder(on(String, into))]
 pub struct FormulaPassage {
     pub id: String,
@@ -31,7 +31,7 @@ pub struct FormulaPassage {
 }
 
 /// Coordinates use Grobid's `page,x,y,width,height` convention.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 pub struct BoundingBox {
     pub page: Option<u32>,
     pub x: f64,
@@ -41,7 +41,7 @@ pub struct BoundingBox {
 }
 
 /// A bibliographic reference embedded in passage text.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 #[builder(on(String, into))]
 pub struct ReferenceSpan {
     pub target: Option<String>,

@@ -1,7 +1,9 @@
-use crate::models::canonical::relations::publication_event;
+use enum_dispatch::enum_dispatch;
 use std::sync::Arc;
 
-#[typetag::serde(tag = "type")]
+use crate::models::canonical::relations::publication_event::EPublicationEvent;
+
+#[enum_dispatch]
 pub trait TPublicationVenue: Send + Sync {
     fn venue_id(&self) -> &str;
     fn issn(&self) -> Option<&str>;
@@ -11,7 +13,9 @@ pub trait TPublicationVenue: Send + Sync {
 
 pub trait TJournal: TPublicationVenue {}
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct Journal {
     pub venue_id: String,
@@ -22,10 +26,9 @@ pub struct Journal {
 #[derive(bon::Builder)]
 pub struct AJournal {
     pub journal: Journal,
-    pub publication_events: Vec<Arc<dyn publication_event::TPublicationEvent>>,
+    pub publication_events: Vec<Arc<EPublicationEvent>>,
 }
 
-#[typetag::serde(name = "journal")]
 impl TPublicationVenue for Journal {
     fn venue_id(&self) -> &str {
         &self.venue_id
@@ -47,7 +50,9 @@ impl TJournal for Journal {}
 
 pub trait TConference: TPublicationVenue {}
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct Conference {
     pub venue_id: String,
@@ -58,10 +63,9 @@ pub struct Conference {
 #[derive(bon::Builder)]
 pub struct AConference {
     pub conference: Conference,
-    pub publication_events: Vec<Arc<dyn publication_event::TPublicationEvent>>,
+    pub publication_events: Vec<Arc<EPublicationEvent>>,
 }
 
-#[typetag::serde(name = "conference")]
 impl TPublicationVenue for Conference {
     fn venue_id(&self) -> &str {
         &self.venue_id
@@ -81,16 +85,10 @@ impl TPublicationVenue for Conference {
 }
 impl TConference for Conference {}
 
-#[typetag::serde(name = "journal")]
-impl publication_event::TPublicationVenue for Journal {
-    fn venue_id(&self) -> &str {
-        TPublicationVenue::venue_id(self)
-    }
-}
-
-#[typetag::serde(name = "conference")]
-impl publication_event::TPublicationVenue for Conference {
-    fn venue_id(&self) -> &str {
-        TPublicationVenue::venue_id(self)
-    }
+#[enum_dispatch(TPublicationVenue)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EPublicationVenue {
+    Journal,
+    Conference,
 }

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::models::draft::bibliography::{Contributor, Identifier};
 
 /// A bibliography entry from `listBibl`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 #[builder(on(String, into))]
 pub struct Citation {
     pub id: String,
@@ -18,7 +18,9 @@ pub struct Citation {
     pub urls: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct PublicationMetadata {
     pub journal: Option<String>,
@@ -35,7 +37,7 @@ pub struct PublicationMetadata {
     pub chapter: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 #[builder(on(String, into))]
 pub struct CitationNote {
     pub kind: Option<String>,
