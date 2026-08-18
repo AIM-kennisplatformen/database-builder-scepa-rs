@@ -1,0 +1,18 @@
+include:
+  - compose.yaml
+
+services:
+  app:
+    build:
+      target: release
+    environment:
+      RUST_LOG: ${RUST_LOG:-scepa=info}
+    volumes: !reset []
+
+  frontend:
+    build:
+      target: release
+    environment: !reset {}
+    ports: !override
+      - "${FRONTEND_PORT:-5173}:80"
+    volumes: !reset []

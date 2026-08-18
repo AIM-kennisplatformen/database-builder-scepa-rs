@@ -3,6 +3,7 @@ include:
 
 services:
   typedb-mcp:
+    profiles: [tools]
     image: typedb/typedb-mcp:latest
     command:
       - --typedb-address
@@ -19,6 +20,7 @@ services:
     restart: unless-stopped
 
   sonarqube:
+    profiles: [tools]
     image: sonarqube:latest
     environment:
       SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
