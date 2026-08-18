@@ -13,9 +13,9 @@ export default function UploadDocument() {
   };
 
   return (
-    <div className="rounded-lg bg-white p-8 shadow-md">
+    <div className="rounded-lg bg-white p-8 shadow-md text-primary ">
       <h2 className="text-xl font-bold">Upload documents</h2>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-muted-foreground italic">
         Add PDF files to include as sources.
       </p>
       <div
@@ -33,7 +33,7 @@ export default function UploadDocument() {
             <Upload className="size-7 text-primary" />
           </div>
           <h3>Click to browse</h3>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground italic">
             PDF only, up to 20MB per file
           </p>
         </div>
