@@ -1,10 +1,10 @@
 services:
   app:
-    profiles: [server]
     build:
       context: ./backend
+      target: development
     environment:
-      RUST_LOG: ${RUST_LOG}
+      RUST_LOG: ${RUST_LOG:-scepa=debug}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       TYPEDB_ADDRESS: typedb:1729
       TYPEDB_DATABASE: ${TYPEDB_DATABASE}
@@ -21,7 +21,12 @@ services:
       RESTATE_DEPLOYMENT_URL: http://app:9080
       RESTATE_ENDPOINT_ADDRESS: 0.0.0.0:9080
     ports:
-      - "${API_PORT}:3000"
+      - "${API_PORT:-3000}:3000"
+    volumes:
+      - ./backend:/app
+      - backend_target:/app/target
+      - cargo_registry:/usr/local/cargo/registry
+      - cargo_git:/usr/local/cargo/git
     depends_on:
       garage:
         condition: service_healthy
@@ -35,8 +40,22 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  frontend:
+    build:
+      context: ./frontend
+      target: development
+    environment:
+      VITE_API_PROXY_TARGET: http://app:3000
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      - app
+    restart: unless-stopped
+
   typedb:
-    profiles: [storage]
     image: typedb/typedb:3.12.2
     ports:
       - "${TYPEDB_GRPC_PORT}:1729"
@@ -52,7 +71,6 @@ services:
     restart: unless-stopped
 
   postgres:
-    profiles: [server]
     image: postgres:18-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -71,7 +89,6 @@ services:
     restart: unless-stopped
 
   garage:
-    profiles: [storage]
     image: dxflrs/garage:v2.3.0
     command: ["/garage", "server", "--single-node", "--default-bucket"]
     environment:
@@ -94,7 +111,6 @@ services:
     restart: unless-stopped
 
   grobid:
-    profiles: [server]
     image: grobid/grobid:0.9.0-crf
     init: true
     ulimits:
@@ -112,7 +128,6 @@ services:
     restart: unless-stopped
 
   restate:
-    profiles: [server]
     image: docker.restate.dev/restatedev/restate:1.7.2
     command: ["--node-name=restate-1"]
     ports:
@@ -130,6 +145,10 @@ services:
     restart: unless-stopped
 
 volumes:
+  backend_target:
+  cargo_git:
+  cargo_registry:
+  frontend_node_modules:
   garage_data:
   garage_meta:
   postgres_data:
