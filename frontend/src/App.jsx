@@ -1,8 +1,8 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import Header from "./components/Header";
-import UploadDocument from "./pages/UploadDocument";
-import UpdateDocument from "./pages/UpdateDocument";
-import FixDocument from "./pages/FixDocument";
+import UploadDocumentPage from "./pages/UploadDocumentPage";
+import UpdateDocumentPage from "./pages/UpdateDocumentPage";
+import FixDocumentPage from "./pages/FixDocumentPage";
 
 function App() {
   return (
@@ -13,9 +13,9 @@ function App() {
       <div className="flex min-h-screen items-center justify-center bg-slate-100">
         <Routes>
           <Route path="/" element={<Navigate to="/upload" replace />} />
-          <Route path="/upload" element={<UploadDocument />} />
-          <Route path="/update" element={<UpdateDocument />} />
-          <Route path="/fix" element={<FixDocument />} />
+          <Route path="/upload" element={<UploadDocumentPage />} />
+          <Route path="/update" element={<UpdateDocumentPage />} />
+          <Route path="/fix" element={<FixDocumentPage />} />
         </Routes>
       </div>
     </div>

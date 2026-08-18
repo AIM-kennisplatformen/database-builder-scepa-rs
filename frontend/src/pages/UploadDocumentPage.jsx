@@ -1,7 +1,7 @@
 import { Upload } from "lucide-react";
 import { useRef, useState } from "react";
 
-export default function UploadDocument() {
+export default function UploadDocumentPage() {
   const [file, setFile] = useState(null);
   const inputRef = useRef(null);
 

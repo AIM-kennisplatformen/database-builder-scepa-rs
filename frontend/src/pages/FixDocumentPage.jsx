@@ -1,4 +1,4 @@
-export default function FixDocument() {
+export default function FixDocumentPage() {
   return (
     <div className="rounded-lg bg-white p-8 shadow-md text-primary">
       <h2 className="text-xl font-bold">Fix documents</h2>
