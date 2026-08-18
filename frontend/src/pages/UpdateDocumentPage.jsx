@@ -5,16 +5,23 @@ import { useEffect, useState } from "react";
 export default function UpdateDocumentPage({}) {
   const tableHeaders = ["Title", "Stable identifiers", "Published"];
   const [documents, setDocuments] = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     fetch("/api/documents")
-      .then((res) => res.json())
-      .then(setDocuments);
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`Failed to load documents (${res.status})`);
+        }
+        return res.json();
+      })
+      .then(setDocuments)
+      .catch((err) => setError(err.message));
   }, []);
 
   return (
     <div className="rounded-lg bg-white p-8 shadow-md text-primary flex flex-col items-center">
-      <div className="flex flex-row gap-1.5 mb-1">
+      <div className="flex flex-row gap-1.5 mb-2">
         <SavePlus className="size-4" />
         <h2 className="text-xs font-semibold">Update documents</h2>
       </div>
@@ -26,7 +33,8 @@ export default function UpdateDocumentPage({}) {
         canonical graph are shown here.
       </p>
       <div className="mt-4">
-        {documents && (
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        {!error && documents && (
           <CustomTable headers={tableHeaders} documents={documents} />
         )}
       </div>
