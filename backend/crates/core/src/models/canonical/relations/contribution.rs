@@ -2,45 +2,68 @@
 
 use std::sync::Arc;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+use enum_dispatch::enum_dispatch;
+
+use crate::models::canonical::entities::{
+    document::EDocument,
+    organization::{EOrganization, TOrganization},
+    person::{EPerson, TPerson},
+};
+
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ContributorKind {
     Person,
     Organization,
 }
 
-#[typetag::serde(tag = "type")]
-pub trait TContributor: Send + Sync {
-    fn contributor_id(&self) -> &str;
-    fn contributor_kind(&self) -> ContributorKind;
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(untagged)]
+pub enum EContributor {
+    Person(Arc<EPerson>),
+    Organization(Arc<EOrganization>),
 }
 
-#[typetag::serde(tag = "type")]
-pub trait TWork: Send + Sync {
-    fn document_id(&self) -> &str;
+impl EContributor {
+    pub fn contributor_id(&self) -> &str {
+        match self {
+            Self::Person(person) => person.person_id(),
+            Self::Organization(organization) => organization.organization_id(),
+        }
+    }
+
+    pub const fn contributor_kind(&self) -> ContributorKind {
+        match self {
+            Self::Person(_) => ContributorKind::Person,
+            Self::Organization(_) => ContributorKind::Organization,
+        }
+    }
 }
 
-#[typetag::serde(tag = "type")]
+#[enum_dispatch]
 pub trait TContribution: Send + Sync {
-    fn contributor(&self) -> &Arc<dyn TContributor>;
-    fn work(&self) -> &Arc<dyn TWork>;
+    fn contributor(&self) -> &EContributor;
+    fn work(&self) -> &EDocument;
     fn relation_type(&self) -> &'static str;
 }
 
-#[derive(serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 pub struct Contribution {
-    pub contributor: Arc<dyn TContributor>,
-    pub work: Arc<dyn TWork>,
+    pub contributor: Arc<EContributor>,
+    pub work: Arc<EDocument>,
 }
 
-#[typetag::serde(name = "contribution")]
 impl TContribution for Contribution {
-    fn contributor(&self) -> &Arc<dyn TContributor> {
-        &self.contributor
+    fn contributor(&self) -> &EContributor {
+        self.contributor.as_ref()
     }
 
-    fn work(&self) -> &Arc<dyn TWork> {
-        &self.work
+    fn work(&self) -> &EDocument {
+        self.work.as_ref()
     }
 
     fn relation_type(&self) -> &'static str {
@@ -50,21 +73,22 @@ impl TContribution for Contribution {
 
 pub trait TAuthorship: TContribution {}
 
-#[derive(serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 pub struct Authorship {
-    pub contributor: Arc<dyn TContributor>,
-    pub work: Arc<dyn TWork>,
+    pub contributor: Arc<EContributor>,
+    pub work: Arc<EDocument>,
 }
 
 impl TAuthorship for Authorship {}
-#[typetag::serde(name = "authorship")]
 impl TContribution for Authorship {
-    fn contributor(&self) -> &Arc<dyn TContributor> {
-        &self.contributor
+    fn contributor(&self) -> &EContributor {
+        self.contributor.as_ref()
     }
 
-    fn work(&self) -> &Arc<dyn TWork> {
-        &self.work
+    fn work(&self) -> &EDocument {
+        self.work.as_ref()
     }
 
     fn relation_type(&self) -> &'static str {
@@ -74,24 +98,34 @@ impl TContribution for Authorship {
 
 pub trait TPeerReview: TContribution {}
 
-#[derive(serde::Serialize, serde::Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 pub struct PeerReview {
-    pub contributor: Arc<dyn TContributor>,
-    pub work: Arc<dyn TWork>,
+    pub contributor: Arc<EContributor>,
+    pub work: Arc<EDocument>,
 }
 
 impl TPeerReview for PeerReview {}
-#[typetag::serde(name = "peer_review")]
 impl TContribution for PeerReview {
-    fn contributor(&self) -> &Arc<dyn TContributor> {
-        &self.contributor
+    fn contributor(&self) -> &EContributor {
+        self.contributor.as_ref()
     }
 
-    fn work(&self) -> &Arc<dyn TWork> {
-        &self.work
+    fn work(&self) -> &EDocument {
+        self.work.as_ref()
     }
 
     fn relation_type(&self) -> &'static str {
         "peer_review"
     }
+}
+
+#[enum_dispatch(TContribution)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EContribution {
+    Contribution,
+    Authorship,
+    PeerReview,
 }

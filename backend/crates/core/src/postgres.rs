@@ -22,7 +22,7 @@ pub struct DocumentArtifacts {
 }
 
 /// A document that has successfully reached the canonical graph.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct PublishedDocument {
     pub pdf_hash: String,
     pub artifact: DraftDocument,
@@ -30,7 +30,7 @@ pub struct PublishedDocument {
 }
 
 /// Metadata used by the update-document picker.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct PublishedDocumentSummary {
     pub pdf_hash: String,
     pub title: Option<String>,
@@ -50,7 +50,7 @@ pub struct PostgresReviewStore {
 }
 
 /// Review-case metadata returned by the operator API.
-#[derive(Clone, Debug, Deserialize, Serialize, sqlx::FromRow)]
+#[derive(Clone, Debug, Deserialize, Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct ReviewCase {
     pub id: i64,
     pub workflow_id: String,

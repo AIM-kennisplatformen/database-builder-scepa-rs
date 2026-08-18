@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use crate::models::draft::passage::TextPassage;
 
 /// Bibliographic data describing the converted document itself.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema,
+)]
 #[builder(on(String, into))]
 pub struct Bibliography {
     pub title: Option<String>,
@@ -18,7 +20,7 @@ pub struct Bibliography {
 }
 
 /// A person credited by a document or citation.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 #[builder(on(String, into))]
 pub struct Contributor {
     pub name: String,
@@ -28,7 +30,7 @@ pub struct Contributor {
     pub role: ContributorRole,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ContributorRole {
     Author,
@@ -36,7 +38,7 @@ pub enum ContributorRole {
 }
 
 /// A typed identifier together with the TEI level on which it occurred.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, bon::Builder)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 #[builder(on(String, into))]
 pub struct Identifier {
     pub kind: IdentifierKind,
@@ -44,7 +46,7 @@ pub struct Identifier {
     pub scope: IdentifierScope,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum IdentifierKind {
     Doi,
@@ -57,7 +59,7 @@ pub enum IdentifierKind {
     Other(String),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum IdentifierScope {
     Document,

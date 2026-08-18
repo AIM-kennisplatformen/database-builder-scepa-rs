@@ -10,7 +10,7 @@ use crate::models::draft::{Passage, TeiDocument};
 use crate::pipeline::{PipelineService, ReviewArtifact, ReviewStore, ValidationReport};
 
 /// Non-fatal quality findings produced by the TEI conversion stage.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TeiValidationWarning {
     MissingTitle,
