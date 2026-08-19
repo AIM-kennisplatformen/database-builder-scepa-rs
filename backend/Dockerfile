@@ -1,5 +1,16 @@
 # syntax=docker/dockerfile:1
 
+FROM rust:1.97-bookworm AS development
+
+RUN cargo install cargo-watch --locked
+
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+EXPOSE 3000 9080
+CMD ["cargo", "watch", "--watch", "crates", "--watch", "Cargo.toml", "--watch", "Cargo.lock", "--exec", "run --package scepa-api"]
+
 FROM rust:1.97-bookworm AS builder
 
 WORKDIR /app
@@ -11,7 +22,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --locked --release --package scepa-api \
     && cp target/release/scepa-api /usr/local/bin/scepa-api
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim AS release
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates \
