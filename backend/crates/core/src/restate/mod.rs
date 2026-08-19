@@ -8,7 +8,7 @@ pub use client::{NewDocumentWorkflowHandle, RestateClient};
 
 pub use services::{
     ArtifactRestateService, GarageRestateService, GrobidRestateService, TeiRestateService,
-    TypeDbRestateService,
+    TypeDbRestateService, VectorRestateService,
 };
 pub use workflows::{
     DocumentExtractionWorkflow, FixDocumentWorkflow, NewDocumentWorkflow, UpdateDocumentWorkflow,

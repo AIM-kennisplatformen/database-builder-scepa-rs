@@ -6,17 +6,20 @@ use reqwest::Url;
 use restate_sdk::prelude::{Endpoint, HttpServer};
 use scepa::{
     pipeline::{
+        embedding::{EmbeddingConfig, EmbeddingSource},
         garage::{GarageClient, GaragePipelineService, PostgresPdfStore},
         grobid::{GrobidExtractionService, HttpGrobidClient},
+        qdrant::{QdrantConfig, QdrantStore},
         tei::TeiConversionService,
         typedb::TypeDbService,
+        vector::DocumentVectorPipeline,
     },
     postgres::PostgresReviewStore,
     restate::{
         RestateClient,
         services::{
             ArtifactRestateService, GarageRestateService, GrobidRestateService, TeiRestateService,
-            TypeDbRestateService,
+            TypeDbRestateService, VectorRestateService,
         },
         workflows::{
             DocumentExtractionWorkflow, FixDocumentWorkflow, NewDocumentWorkflow,
@@ -78,6 +81,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
     )
     .await
     .map_err(internal_error)?;
+    let embedding_config = EmbeddingConfig::new(
+        value("OPENAI_HOST", "https://api.tokenfactory.nebius.com/v1/"),
+        required("OPENAI_API_KEY")?,
+        value("OPENAI_EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-8B"),
+        positive_usize("EMBEDDING_MAX_CONCURRENCY", 4)?,
+    )
+    .map_err(internal_error)?;
+    let qdrant_config = QdrantConfig::new(
+        value("QDRANT_URL", "http://localhost:6334"),
+        value("QDRANT_COLLECTION", "scepa"),
+        positive_u64("QDRANT_VECTOR_SIZE", 4096)?,
+        value("QDRANT_API_KEY", ""),
+    );
+    let qdrant = QdrantStore::connect(&qdrant_config)
+        .await
+        .map_err(internal_error)?;
+    let vectors = DocumentVectorPipeline::new(EmbeddingSource::new(embedding_config), qdrant);
 
     let restate_endpoint = Endpoint::builder()
         .bind(GarageRestateService::new(garage_pipeline.clone()))
@@ -90,6 +110,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             typedb.clone(),
             review_store.clone(),
         ))
+        .bind(VectorRestateService::new(vectors))
         .bind(ArtifactRestateService::new(review_store.clone()))
         .bind(DocumentExtractionWorkflow)
         .bind(NewDocumentWorkflow)
@@ -171,6 +192,32 @@ fn required(name: &str) -> io::Result<String> {
             format!("required environment variable {name} is not set"),
         )
     })
+}
+
+fn positive_usize(name: &str, default: usize) -> io::Result<usize> {
+    let raw = env::var(name).unwrap_or_else(|_| default.to_string());
+    raw.parse::<usize>()
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{name} must be a positive integer"),
+            )
+        })
+}
+
+fn positive_u64(name: &str, default: u64) -> io::Result<u64> {
+    let raw = env::var(name).unwrap_or_else(|_| default.to_string());
+    raw.parse::<u64>()
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{name} must be a positive integer"),
+            )
+        })
 }
 
 fn address(name: &str, default: &str) -> io::Result<SocketAddr> {

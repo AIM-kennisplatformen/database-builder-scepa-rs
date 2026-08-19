@@ -18,8 +18,11 @@ cargo run --package scepa-cli -- --help
 ```
 
 The API reads `RESTATE_INGRESS_URL` (default `http://localhost:8080`) and
-invokes `NewDocumentWorkflow` after storing each upload in Garage. The CLI
-sends uploads to `SCEPA_API_URL` (default `http://localhost:3000`).
+invokes `NewDocumentWorkflow` after storing each upload in Garage. Successful
+publication writes canonical metadata to TypeDB and passage embeddings to
+Qdrant before finalizing the artifact. `EMBEDDING_MAX_CONCURRENCY` limits the
+number of process-wide embedding HTTP calls (default `4`). The CLI sends
+uploads to `SCEPA_API_URL` (default `http://localhost:3000`).
 
 Runtime services and environment variables are managed from the repository
 root with `docker compose` and `.env`.
