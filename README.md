@@ -1,6 +1,6 @@
 # SCEPA
 
-SCEPA contains the PDF extraction, TEI conversion, storage, API, and CLI
+SCEPA contains the PDF extraction, TEI conversion, storage, vector publication, API, and CLI
 building blocks for a document pipeline. Uploads are stored in Garage before
 the durable `NewDocumentWorkflow` is invoked with the PDF's content hash.
 
@@ -69,6 +69,7 @@ The stack exposes:
 - TypeDB gRPC: `localhost:1729`
 - TypeDB HTTP: `http://localhost:8000`
 - TypeDB MCP with `tools`: `http://localhost:8001`
+- Qdrant HTTP/gRPC: `localhost:6333` / `localhost:6334`
 - SonarQube with `tools`: `http://localhost:9000`
 
 ## API
@@ -79,9 +80,16 @@ client generation, validation, or documentation tooling, or browse the
 interactive Swagger UI at `http://localhost:3000/swagger-ui/`.
 
 `POST /pdfs` submits a PDF to `NewDocumentWorkflow`, using its SHA-256 hash as
-the workflow identifier, and waits for extraction, TypeDB export, and valid
-artifact persistence. The returned artifact then opens in the shared update
-flow for optional manual corrections.
+the workflow identifier, and waits for extraction, TypeDB export, embedding and
+Qdrant publication, and valid artifact persistence. The returned artifact then
+opens in the shared update flow for optional manual corrections.
+
+Every non-empty effective abstract and body passage is embedded through the
+OpenAI-compatible endpoint configured by `OPENAI_HOST`, `OPENAI_API_KEY`, and
+`OPENAI_EMBEDDING_MODEL`. Qdrant points carry `pdf_hash`, `is_abstract`, and the
+passage `id`; updates only re-embed changed passage text. Set
+`EMBEDDING_MAX_CONCURRENCY` (default `4`) to cap embedding HTTP calls across all
+workflows in one API process.
 
 ```bash
 curl --request POST \
