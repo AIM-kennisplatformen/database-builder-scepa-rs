@@ -69,6 +69,10 @@ button:hover {
   background-color: var(--primary-dark);
   color: var(--primary-foreground);
 }
+button:disabled {
+  background-color: var(--muted-foreground);
+  cursor: not-allowed;
+}
 
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
