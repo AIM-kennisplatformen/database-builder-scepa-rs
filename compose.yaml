@@ -10,6 +10,14 @@ services:
       TYPEDB_DATABASE: ${TYPEDB_DATABASE}
       TYPEDB_USERNAME: ${TYPEDB_USERNAME}
       TYPEDB_PASSWORD: ${TYPEDB_PASSWORD}
+      QDRANT_URL: http://qdrant:6334
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-scepa}
+      QDRANT_VECTOR_SIZE: ${QDRANT_VECTOR_SIZE:-4096}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      OPENAI_HOST: ${OPENAI_HOST:-https://api.tokenfactory.nebius.com/v1/}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-8B}
+      EMBEDDING_MAX_CONCURRENCY: ${EMBEDDING_MAX_CONCURRENCY:-4}
       GROBID_URL: http://grobid:8070
       GARAGE_ENDPOINT: http://garage:3900
       GARAGE_REGION: ${GARAGE_REGION}
@@ -33,6 +41,8 @@ services:
       grobid:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
       restate:
         condition: service_healthy
@@ -86,6 +96,21 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.18
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6334'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
     restart: unless-stopped
 
   garage:
@@ -152,5 +177,6 @@ volumes:
   garage_data:
   garage_meta:
   postgres_data:
+  qdrant_data:
   restate_data:
   typedb_data:
