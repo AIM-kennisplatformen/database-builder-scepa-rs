@@ -6,11 +6,11 @@ import FixDocumentPage from "./pages/FixDocumentPage";
 
 function App() {
   return (
-    <div className="">
+    <div className="h-screen overflow-hidden flex flex-col">
       <div className="m-0">
         <Header />
       </div>
-      <div className="flex min-h-screen items-center justify-center bg-slate-100">
+      <div className="flex flex-1 min-h-0 items-center justify-center bg-slate-100 overflow-hidden">
         <Routes>
           <Route path="/" element={<Navigate to="/upload" replace />} />
           <Route path="/upload" element={<UploadDocumentPage />} />

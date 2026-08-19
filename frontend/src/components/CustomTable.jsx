@@ -1,12 +1,14 @@
+import { ChevronRight } from "lucide-react";
+
 function identifierKindLabel(kind) {
   return typeof kind === "string" ? kind : kind.other;
 }
 
 export default function CustomTable({ headers, documents }) {
   return (
-    <div className="w-full max-w-7xl overflow-x-auto">
+    <div className="w-full max-w-7xl">
       <table className="w-full min-w-3xl border-collapse text-sm">
-        <thead>
+        <thead className="sticky top-0 bg-white">
           <tr className="border-b border-border text-muted-foreground">
             {headers.map((header) => (
               <th
@@ -39,6 +41,11 @@ export default function CustomTable({ headers, documents }) {
                 ))}
               </td>
               <td className="px-3 py-2 ">{document.published_at}</td>
+              <td className="px-3 py-2 ">
+                <button className="bg-accent! border-primary! hover:bg-gray-200!">
+                  <ChevronRight className="text-primary size-4" />
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
