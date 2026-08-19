@@ -65,6 +65,7 @@ export default function UploadDocumentPage() {
               className="ml-auto bg-primary-foreground! hover:bg-gray-300! border-primary! text-primary!"
               onClick={() => {
                 setFile(null);
+                setError(null);
               }}
             >
               Remove
