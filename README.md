@@ -86,8 +86,9 @@ opens in the shared update flow for optional manual corrections.
 
 Every non-empty effective abstract and body passage is embedded through the
 OpenAI-compatible endpoint configured by `OPENAI_HOST`, `OPENAI_API_KEY`, and
-`OPENAI_EMBEDDING_MODEL`. Qdrant points carry `pdf_hash`, `is_abstract`, and the
-passage `id`; updates only re-embed changed passage text. Set
+`OPENAI_EMBEDDING_MODEL`. Qdrant points carry `pdf_hash`, `is_abstract`, the
+passage `id`, and its source `coordinates`; updates refresh points when passage
+text or coordinates change. Set
 `EMBEDDING_MAX_CONCURRENCY` (default `4`) to cap embedding HTTP calls across all
 workflows in one API process.
 

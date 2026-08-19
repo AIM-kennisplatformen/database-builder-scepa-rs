@@ -6,7 +6,7 @@ use qdrant_client::qdrant::PointStruct;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::models::draft::{Passage, TeiDocument};
+use crate::models::draft::{BoundingBox, Passage, TeiDocument};
 
 use super::{
     embedding::{EmbeddingError, EmbeddingSource},
@@ -21,13 +21,20 @@ struct PassageIdentity {
     id: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct EmbeddablePassage {
     identity: PassageIdentity,
     text: String,
+    coordinates: Vec<BoundingBox>,
 }
 
-#[derive(Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
+struct PassageData {
+    text: String,
+    coordinates: Vec<BoundingBox>,
+}
+
+#[derive(Debug, Default, PartialEq)]
 struct VectorChangeSet {
     delete: Vec<PassageIdentity>,
     upsert: Vec<EmbeddablePassage>,
@@ -120,7 +127,12 @@ impl DocumentVectorPipeline {
                 PointStruct::new(
                     point_id(pdf_hash, &passage.identity).to_string(),
                     vector,
-                    passage_payload(pdf_hash, passage.identity.is_abstract, &passage.identity.id),
+                    passage_payload(
+                        pdf_hash,
+                        passage.identity.is_abstract,
+                        &passage.identity.id,
+                        &passage.coordinates,
+                    ),
                 )
             })
             .collect();
@@ -140,22 +152,27 @@ fn diff_documents(
     let new = collect_passages(new_document)?;
     let mut changes = VectorChangeSet::default();
 
-    for (identity, old_text) in &old {
+    for (identity, old_passage) in &old {
         match new.get(identity) {
             None => changes.delete.push(identity.clone()),
-            Some(new_text) if new_text != old_text => {
+            Some(new_passage) if new_passage != old_passage => {
                 changes.delete.push(identity.clone());
                 changes.upsert.push(EmbeddablePassage {
                     identity: identity.clone(),
-                    text: new_text.clone(),
+                    text: new_passage.text.clone(),
+                    coordinates: new_passage.coordinates.clone(),
                 });
             }
             Some(_) => {}
         }
     }
-    for (identity, text) in new {
+    for (identity, passage) in new {
         if !old.contains_key(&identity) {
-            changes.upsert.push(EmbeddablePassage { identity, text });
+            changes.upsert.push(EmbeddablePassage {
+                identity,
+                text: passage.text,
+                coordinates: passage.coordinates,
+            });
         }
     }
     Ok(changes)
@@ -163,27 +180,34 @@ fn diff_documents(
 
 fn collect_passages(
     document: &TeiDocument,
-) -> Result<BTreeMap<PassageIdentity, String>, VectorPipelineError> {
+) -> Result<BTreeMap<PassageIdentity, PassageData>, VectorPipelineError> {
     let mut passages = BTreeMap::new();
     for passage in &document.bibliography.abstract_text {
-        insert_passage(&mut passages, true, &passage.id, &passage.text)?;
+        insert_passage(
+            &mut passages,
+            true,
+            &passage.id,
+            &passage.text,
+            &passage.coordinates,
+        )?;
     }
     for passage in &document.body_text {
-        let (id, text) = match passage {
-            Passage::Text(passage) => (&passage.id, &passage.text),
-            Passage::Formula(passage) => (&passage.id, &passage.text),
+        let (id, text, coordinates) = match passage {
+            Passage::Text(passage) => (&passage.id, &passage.text, &passage.coordinates),
+            Passage::Formula(passage) => (&passage.id, &passage.text, &passage.coordinates),
         };
-        insert_passage(&mut passages, false, id, text)?;
+        insert_passage(&mut passages, false, id, text, coordinates)?;
     }
-    passages.retain(|_, text| !text.trim().is_empty());
+    passages.retain(|_, passage| !passage.text.trim().is_empty());
     Ok(passages)
 }
 
 fn insert_passage(
-    passages: &mut BTreeMap<PassageIdentity, String>,
+    passages: &mut BTreeMap<PassageIdentity, PassageData>,
     is_abstract: bool,
     id: &str,
     text: &str,
+    coordinates: &[BoundingBox],
 ) -> Result<(), VectorPipelineError> {
     let identity = PassageIdentity {
         is_abstract,
@@ -195,7 +219,13 @@ fn insert_passage(
             id: id.to_owned(),
         });
     }
-    passages.insert(identity, text.to_owned());
+    passages.insert(
+        identity,
+        PassageData {
+            text: text.to_owned(),
+            coordinates: coordinates.to_vec(),
+        },
+    );
     Ok(())
 }
 
@@ -281,6 +311,26 @@ mod tests {
         assert_eq!(changes.upsert.len(), 2);
         assert!(changes.upsert.iter().any(|row| row.identity.id == "a1"));
         assert!(changes.upsert.iter().any(|row| row.identity.id == "added"));
+    }
+
+    #[test]
+    fn coordinate_changes_refresh_the_existing_point() {
+        let old = document(vec![], vec![Passage::Text(text("p1", "same text"))]);
+        let mut relocated = text("p1", "same text");
+        relocated.coordinates.push(BoundingBox {
+            page: Some(3),
+            x: 1.0,
+            y: 2.0,
+            width: 3.0,
+            height: 4.0,
+        });
+        let new = document(vec![], vec![Passage::Text(relocated)]);
+
+        let changes = diff_documents(Some(&old), &new).unwrap();
+        assert_eq!(changes.delete.len(), 1);
+        assert_eq!(changes.upsert.len(), 1);
+        assert_eq!(changes.upsert[0].text, "same text");
+        assert_eq!(changes.upsert[0].coordinates[0].page, Some(3));
     }
 
     #[test]

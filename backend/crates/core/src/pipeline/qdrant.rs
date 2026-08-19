@@ -12,6 +12,8 @@ use qdrant_client::{
 use serde_json::json;
 use thiserror::Error;
 
+use crate::models::draft::BoundingBox;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QdrantConfig {
     pub url: String,
@@ -152,11 +154,17 @@ impl QdrantStore {
     }
 }
 
-pub fn passage_payload(pdf_hash: &str, is_abstract: bool, id: &str) -> Payload {
+pub fn passage_payload(
+    pdf_hash: &str,
+    is_abstract: bool,
+    id: &str,
+    coordinates: &[BoundingBox],
+) -> Payload {
     json!({
         "pdf_hash": pdf_hash,
         "is_abstract": is_abstract,
         "id": id,
+        "coordinates": coordinates,
     })
     .try_into()
     .expect("passage payload is always a JSON object")
@@ -207,11 +215,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn payload_contains_only_the_stable_passage_metadata() {
-        let value: serde_json::Value = passage_payload("abc", true, "abstract_1").into();
+    fn payload_contains_passage_identity_and_coordinates() {
+        let coordinates = vec![BoundingBox {
+            page: Some(2),
+            x: 10.0,
+            y: 20.0,
+            width: 30.0,
+            height: 40.0,
+        }];
+        let value: serde_json::Value =
+            passage_payload("abc", true, "abstract_1", &coordinates).into();
         assert_eq!(
             value,
-            json!({"pdf_hash": "abc", "is_abstract": true, "id": "abstract_1"})
+            json!({
+                "pdf_hash": "abc",
+                "is_abstract": true,
+                "id": "abstract_1",
+                "coordinates": [{
+                    "page": 2,
+                    "x": 10.0,
+                    "y": 20.0,
+                    "width": 30.0,
+                    "height": 40.0
+                }]
+            })
         );
     }
 }
