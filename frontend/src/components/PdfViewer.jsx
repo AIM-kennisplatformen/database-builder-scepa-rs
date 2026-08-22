@@ -40,8 +40,8 @@ export default function PdfViewer({ file }) {
   }
 
   return (
-    <div className="flex w-full max-w-3xl flex-col items-center gap-3">
-      <div className="flex w-full items-center justify-between rounded border border-border bg-white px-3 py-2 text-sm">
+    <div className="flex w-full max-h-96 max-w-3xl flex-col items-center gap-3">
+      <div className="flex w-full items-center justify-center z-500 rounded border border-border bg-white px-3 py-2 text-sm">
         <div className="flex items-center gap-2">
           <button
             onClick={goToPrevPage}
@@ -61,7 +61,7 @@ export default function PdfViewer({ file }) {
             <ChevronRight className="size-4" />
           </button>
         </div>
-        <div className="flex items-center gap-2">
+        {/* <div className="flex items-center gap-2">
           <button
             onClick={zoomOut}
             disabled={scale <= MIN_SCALE}
@@ -79,15 +79,23 @@ export default function PdfViewer({ file }) {
           >
             <ZoomIn className="size-4" />
           </button>
-        </div>
+        </div> */}
       </div>
 
       <div className="w-full overflow-auto rounded border border-border bg-muted/20">
         <Document
           file={file}
           onLoadSuccess={handleLoadSuccess}
-          loading={<div className="p-6 text-sm text-muted-foreground">Loading PDF...</div>}
-          error={<div className="p-6 text-sm text-destructive">Failed to load PDF.</div>}
+          loading={
+            <div className="p-6 text-sm text-muted-foreground">
+              Loading PDF...
+            </div>
+          }
+          error={
+            <div className="p-6 text-sm text-destructive">
+              Failed to load PDF.
+            </div>
+          }
           className="flex justify-center"
         >
           <Page pageNumber={pageNumber} scale={scale} />

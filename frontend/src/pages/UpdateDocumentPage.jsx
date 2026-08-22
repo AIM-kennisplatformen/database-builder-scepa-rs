@@ -1,22 +1,31 @@
 import PdfViewer from "../components/PdfViewer";
 import UpdateDocumentList from "./UpdateDocumentListPage";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 
 export default function UpdateDocumentPage({}) {
   const { pdf_hash } = useParams();
   const [currentStep, setCurrentStep] = useState(1);
+  const [documentData, setDocumentData] = useState(null);
+  const [error, setError] = useState(null);
 
-  console.log(pdf_hash);
-
-  function renderStep() {
-    switch (currentStep) {
-      case 1:
-        return <PdfViewer file={`/api/pdfs/${pdf_hash}`} />;
-      default:
-        return <UpdateDocumentList />;
+  useEffect(() => {
+    if (pdf_hash) {
+      fetch(`/api/documents/${pdf_hash}`)
+        .then((res) => {
+          if (!res.ok) {
+            throw new Error(`Failed to load documents (${res.status})`);
+          }
+          return res.json();
+        })
+        .then((res) => setDocumentData(res))
+        .catch((err) => setError(err.message));
     }
-  }
+  }, [pdf_hash]);
 
-  return <div>{renderStep()}</div>;
+  return (
+    <div>
+      <PdfViewer file={`/api/pdfs/${pdf_hash}`} />
+    </div>
+  );
 }

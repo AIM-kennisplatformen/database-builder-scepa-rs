@@ -50,7 +50,9 @@ export default function UpdateDocumentList({}) {
           />
         )}
         {!error && documents && documents.length === 0 && (
-          <p className="text-lg text-primary">No uploaded documents found</p>
+          <p className="text-lg text-primary justify-center flex">
+            No uploaded documents found
+          </p>
         )}
       </div>
     </div>
