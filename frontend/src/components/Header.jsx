@@ -9,7 +9,7 @@ export default function Header() {
     },
     {
       title: "Update Document",
-      to: "/update",
+      to: "/updatelist",
     },
     {
       title: "Fix Document",

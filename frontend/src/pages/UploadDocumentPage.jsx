@@ -30,18 +30,19 @@ export default function UploadDocumentPage() {
       .then((res) => {
         if (!res.ok) {
           return res.text().then((text) => {
-            console.log(text);
-
-            throw new Error(text || `Upload failed (${res.status})`);
+            //res doesn't return json so res.json() doesn't work ------------------------------------------
+            throw new Error(`Upload failed (${res.status})`);
           });
         }
         return res.json();
       })
       .then(() => {
         setFile(null);
-        navigate("/update");
+        navigate("/updatelist");
       })
-      .catch((err) => setError(err.message))
+      .catch((err) => {
+        setError(err.message);
+      })
       .finally(() => setUploading(false));
   }
 
@@ -63,6 +64,7 @@ export default function UploadDocumentPage() {
             </div>
             <button
               className="ml-auto bg-primary-foreground! hover:bg-gray-300! border-primary! text-primary!"
+              disabled={uploading}
               onClick={() => {
                 setFile(null);
                 setError(null);

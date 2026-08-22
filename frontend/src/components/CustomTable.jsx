@@ -4,7 +4,12 @@ function identifierKindLabel(kind) {
   return typeof kind === "string" ? kind : kind.other;
 }
 
-export default function CustomTable({ headers, documents }) {
+export default function CustomTable({
+  headers,
+  documents,
+  onClickHandler,
+  setCurrentFile,
+}) {
   return (
     <div className="w-full max-w-7xl">
       <table className="w-full min-w-3xl border-collapse text-sm">
@@ -42,7 +47,12 @@ export default function CustomTable({ headers, documents }) {
               </td>
               <td className="px-3 py-2 ">{document.published_at}</td>
               <td className="px-3 py-2 ">
-                <button className="bg-accent! border-primary! hover:bg-gray-200!">
+                <button
+                  className="bg-accent! border-primary! hover:bg-gray-200!"
+                  onClick={() =>
+                    onClickHandler(document.pdf_hash, setCurrentFile)
+                  }
+                >
                   <ChevronRight className="text-primary size-4" />
                 </button>
               </td>
