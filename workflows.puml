@@ -416,9 +416,9 @@ else Revised draft is stored
 
      typedb --> typedb_service : Success
 
-     update_workflow -> vector_service : Publish changed effective passages
+     update_workflow -> vector_service : Refresh effective source and combined passages
 
-     vector_service -> embeddings : Embed added or changed passage text
+     vector_service -> embeddings : Embed contextual source and combined text
 
      embeddings --> vector_service : Embedding vectors
 

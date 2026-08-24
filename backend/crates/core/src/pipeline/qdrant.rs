@@ -5,10 +5,12 @@ use std::sync::Arc;
 use qdrant_client::{
     Payload, Qdrant,
     qdrant::{
-        CreateCollectionBuilder, DeletePointsBuilder, Distance, PointStruct, PointsIdsList,
+        CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DeletePointsBuilder, Distance,
+        FieldType, PayloadSchemaInfo, PayloadSchemaType, PointStruct, PointsIdsList,
         UpsertPointsBuilder, VectorParamsBuilder, vectors_config,
     },
 };
+use serde::Serialize;
 use serde_json::json;
 use thiserror::Error;
 
@@ -65,6 +67,15 @@ pub enum QdrantStoreError {
     },
     #[error("expected vector dimension {expected}, got {actual}")]
     VectorDimensionMismatch { expected: u64, actual: usize },
+    #[error(
+        "Qdrant collection `{collection}` has payload index `{field}` with type {actual}; expected {expected}"
+    )]
+    IncompatiblePayloadIndex {
+        collection: String,
+        field: &'static str,
+        expected: &'static str,
+        actual: i32,
+    },
 }
 
 impl QdrantStoreError {
@@ -75,6 +86,7 @@ impl QdrantStoreError {
                 | Self::NamedVectors { .. }
                 | Self::IncompatibleCollection { .. }
                 | Self::VectorDimensionMismatch { .. }
+                | Self::IncompatiblePayloadIndex { .. }
         )
     }
 }
@@ -109,6 +121,7 @@ impl QdrantStore {
                 .await
                 .map_err(|source| operation_error(config, source))?;
         }
+        ensure_payload_indexes(&client, config).await?;
 
         Ok(Self {
             client: Arc::new(client),
@@ -154,20 +167,98 @@ impl QdrantStore {
     }
 }
 
-pub fn passage_payload(
-    pdf_hash: &str,
-    is_abstract: bool,
-    id: &str,
-    coordinates: &[BoundingBox],
-) -> Payload {
-    json!({
-        "pdf_hash": pdf_hash,
-        "is_abstract": is_abstract,
-        "id": id,
-        "coordinates": coordinates,
-    })
-    .try_into()
-    .expect("passage payload is always a JSON object")
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SourcePointPayloadData {
+    pub pdf_hash: String,
+    pub is_abstract: bool,
+    pub is_combined: bool,
+    pub id: String,
+    pub text: String,
+    pub combined_point_ids: Vec<String>,
+    pub bounding_boxes: Vec<BoundingBox>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct CombinedPointPayloadData {
+    pub pdf_hash: String,
+    pub is_abstract: bool,
+    pub is_combined: bool,
+    pub id: String,
+    pub text: String,
+    pub source_point_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum PointPayloadData {
+    Source(SourcePointPayloadData),
+    Combined(CombinedPointPayloadData),
+}
+
+pub fn point_payload(data: &PointPayloadData) -> Payload {
+    json!(data)
+        .try_into()
+        .expect("passage payload is always a JSON object")
+}
+
+const REQUIRED_PAYLOAD_INDEXES: [(&str, FieldType, PayloadSchemaType); 3] = [
+    ("is_abstract", FieldType::Bool, PayloadSchemaType::Bool),
+    ("is_combined", FieldType::Bool, PayloadSchemaType::Bool),
+    ("pdf_hash", FieldType::Keyword, PayloadSchemaType::Keyword),
+];
+
+async fn ensure_payload_indexes(
+    client: &Qdrant,
+    config: &QdrantConfig,
+) -> Result<(), QdrantStoreError> {
+    let info = client
+        .collection_info(&config.collection)
+        .await
+        .map_err(|source| operation_error(config, source))?
+        .result
+        .ok_or_else(|| QdrantStoreError::MissingConfiguration {
+            collection: config.collection.clone(),
+        })?;
+    for (field, field_type) in missing_payload_indexes(config, &info.payload_schema)? {
+        client
+            .create_field_index(
+                CreateFieldIndexCollectionBuilder::new(&config.collection, field, field_type)
+                    .wait(true),
+            )
+            .await
+            .map_err(|source| operation_error(config, source))?;
+    }
+    Ok(())
+}
+
+fn missing_payload_indexes(
+    config: &QdrantConfig,
+    schema: &std::collections::HashMap<String, PayloadSchemaInfo>,
+) -> Result<Vec<(&'static str, FieldType)>, QdrantStoreError> {
+    let mut missing = Vec::new();
+    for (field, field_type, schema_type) in REQUIRED_PAYLOAD_INDEXES {
+        match schema.get(field) {
+            Some(info) if info.data_type == schema_type as i32 => {}
+            Some(info) => {
+                return Err(QdrantStoreError::IncompatiblePayloadIndex {
+                    collection: config.collection.clone(),
+                    field,
+                    expected: schema_type.as_str_name(),
+                    actual: info.data_type,
+                });
+            }
+            None => missing.push((field, field_type)),
+        }
+    }
+    Ok(missing)
 }
 
 async fn validate_collection(
@@ -215,7 +306,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn payload_contains_passage_identity_and_coordinates() {
+    fn source_payload_contains_only_source_fields() {
         let coordinates = vec![BoundingBox {
             page: Some(2),
             x: 10.0,
@@ -224,14 +315,28 @@ mod tests {
             height: 40.0,
         }];
         let value: serde_json::Value =
-            passage_payload("abc", true, "abstract_1", &coordinates).into();
+            point_payload(&PointPayloadData::Source(SourcePointPayloadData {
+                pdf_hash: "abc".into(),
+                is_abstract: true,
+                is_combined: false,
+                id: "abstract_1".into(),
+                text: "An abstract.".into(),
+                combined_point_ids: vec!["d85e465b-6b5e-51f0-a818-3c2b315b48c6".into()],
+                bounding_boxes: coordinates.clone(),
+                section: None,
+                heading: None,
+            }))
+            .into();
         assert_eq!(
             value,
             json!({
                 "pdf_hash": "abc",
                 "is_abstract": true,
+                "is_combined": false,
                 "id": "abstract_1",
-                "coordinates": [{
+                "text": "An abstract.",
+                "combined_point_ids": ["d85e465b-6b5e-51f0-a818-3c2b315b48c6"],
+                "bounding_boxes": [{
                     "page": 2,
                     "x": 10.0,
                     "y": 20.0,
@@ -240,5 +345,88 @@ mod tests {
                 }]
             })
         );
+    }
+
+    #[test]
+    fn combined_payload_contains_only_combined_fields() {
+        let value: serde_json::Value =
+            point_payload(&PointPayloadData::Combined(CombinedPointPayloadData {
+                pdf_hash: "abc".into(),
+                is_abstract: false,
+                is_combined: true,
+                id: "combined_body_00000001".into(),
+                text: "Combined text.".into(),
+                source_point_ids: vec!["e2c35ec9-3afb-5c31-a1c6-e6ea70bc61f3".into()],
+                section: Some("Methods".into()),
+                heading: None,
+            }))
+            .into();
+        assert_eq!(
+            value,
+            json!({
+                "pdf_hash": "abc",
+                "is_abstract": false,
+                "is_combined": true,
+                "id": "combined_body_00000001",
+                "text": "Combined text.",
+                "source_point_ids": ["e2c35ec9-3afb-5c31-a1c6-e6ea70bc61f3"],
+                "section": "Methods"
+            })
+        );
+    }
+
+    fn schema_info(data_type: PayloadSchemaType) -> PayloadSchemaInfo {
+        PayloadSchemaInfo {
+            data_type: data_type as i32,
+            params: None,
+            points: None,
+        }
+    }
+
+    #[test]
+    fn payload_index_reconciliation_finds_missing_indexes() {
+        let config = QdrantConfig::new("url", "collection", 3, "");
+        let schema = std::collections::HashMap::from([(
+            "is_abstract".into(),
+            schema_info(PayloadSchemaType::Bool),
+        )]);
+        assert_eq!(
+            missing_payload_indexes(&config, &schema).unwrap(),
+            [
+                ("is_combined", FieldType::Bool),
+                ("pdf_hash", FieldType::Keyword)
+            ]
+        );
+    }
+
+    #[test]
+    fn payload_index_reconciliation_accepts_required_indexes() {
+        let config = QdrantConfig::new("url", "collection", 3, "");
+        let schema = std::collections::HashMap::from([
+            ("is_abstract".into(), schema_info(PayloadSchemaType::Bool)),
+            ("is_combined".into(), schema_info(PayloadSchemaType::Bool)),
+            ("pdf_hash".into(), schema_info(PayloadSchemaType::Keyword)),
+        ]);
+        assert!(
+            missing_payload_indexes(&config, &schema)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn payload_index_reconciliation_rejects_wrong_types() {
+        let config = QdrantConfig::new("url", "collection", 3, "");
+        let schema = std::collections::HashMap::from([(
+            "is_abstract".into(),
+            schema_info(PayloadSchemaType::Keyword),
+        )]);
+        assert!(matches!(
+            missing_payload_indexes(&config, &schema),
+            Err(QdrantStoreError::IncompatiblePayloadIndex {
+                field: "is_abstract",
+                ..
+            })
+        ));
     }
 }

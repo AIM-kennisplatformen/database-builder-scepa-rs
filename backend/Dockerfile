@@ -8,7 +8,12 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo fetch --locked
+
 EXPOSE 3000 9080
+
 CMD ["cargo", "watch", "--watch", "crates", "--watch", "Cargo.toml", "--watch", "Cargo.lock", "--exec", "run --package scepa-api"]
 
 FROM rust:1.97-bookworm AS builder

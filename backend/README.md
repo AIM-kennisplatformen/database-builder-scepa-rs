@@ -19,9 +19,16 @@ cargo run --package scepa-cli -- --help
 
 The API reads `RESTATE_INGRESS_URL` (default `http://localhost:8080`) and
 invokes `NewDocumentWorkflow` after storing each upload in Garage. Successful
-publication writes canonical metadata to TypeDB and passage embeddings to
-Qdrant before finalizing the artifact. `EMBEDDING_MAX_CONCURRENCY` limits the
-number of process-wide embedding HTTP calls (default `4`). The CLI sends
+publication writes canonical metadata to TypeDB and source-plus-combined passage
+embeddings to Qdrant before finalizing the artifact. Combined points contain only whole
+source passages, target 500 estimated tokens, normally stop at 800, and use
+whole-passage overlap near 80 tokens. This keeps every stored PDF bounding box
+on its source point; combined/source reference arrays use Qdrant point UUIDs.
+Payload indexes are created for `is_abstract`, `is_combined`, and `pdf_hash`.
+This schema requires recreating the collection and republishing documents; no
+backfill is performed. A single oversized passage is kept whole.
+`EMBEDDING_MAX_CONCURRENCY` limits the number of process-wide embedding
+HTTP calls (default `4`). The CLI sends
 uploads to `SCEPA_API_URL` (default `http://localhost:3000`).
 
 Runtime services and environment variables are managed from the repository

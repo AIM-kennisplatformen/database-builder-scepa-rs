@@ -86,9 +86,25 @@ opens in the shared update flow for optional manual corrections.
 
 Every non-empty effective abstract and body passage is embedded through the
 OpenAI-compatible endpoint configured by `OPENAI_HOST`, `OPENAI_API_KEY`, and
-`OPENAI_EMBEDDING_MODEL`. Qdrant points carry `pdf_hash`, `is_abstract`, the
-passage `id`, and its source `coordinates`; updates refresh points when passage
-text or coordinates change. Set
+`OPENAI_EMBEDDING_MODEL`. The same publication also creates combined vectors from
+complete adjacent passages, targeting 500 estimated tokens, stopping at 800,
+and reusing up to 100 tokens of complete trailing passages around the 80-token
+overlap target. Section and heading changes are hard boundaries. An individual
+source passage over 800 tokens remains whole so its PDF coordinates are never
+assigned to text outside that passage.
+
+Source and combined embedding inputs are prefixed with the available document
+title, section, and heading. Source Qdrant payloads contain `id`, `pdf_hash`,
+unprefixed `text`, `combined_point_ids`, `is_abstract`, `is_combined: false`,
+`bounding_boxes`, and optional `section` and `heading`. Combined payloads contain
+the same identity, text, marker, and optional context fields, with
+`is_combined: true` and `source_point_ids` instead of bounding boxes. Both
+reference arrays contain Qdrant point UUIDs. Qdrant creates boolean payload
+indexes for `is_abstract` and `is_combined` and a keyword index for `pdf_hash`.
+
+Updating a document refreshes its complete source-and-combined vector set. This
+payload contract is a breaking change: recreate the Qdrant collection and
+republish documents when deploying it; there is no historical backfill. Set
 `EMBEDDING_MAX_CONCURRENCY` (default `4`) to cap embedding HTTP calls across all
 workflows in one API process.
 
