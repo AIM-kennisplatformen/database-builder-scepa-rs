@@ -2,9 +2,10 @@
 
 use axum::{
     Json, Router,
-    body::Bytes,
+    body::{Body, Bytes},
     extract::{DefaultBodyLimit, Path, State},
-    http::{HeaderValue, StatusCode, header},
+    http::{HeaderValue, Request, StatusCode, header},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -91,7 +92,15 @@ struct RepairDocumentRequest {
     enrich: bool,
 }
 
+#[derive(Serialize, ToSchema)]
+struct ErrorResponse {
+    error: String,
+}
+
 struct ApiError(StatusCode, String);
+
+#[derive(Clone, Copy)]
+struct StructuredApiError;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -121,7 +130,9 @@ struct ApiDoc;
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (self.0, self.1).into_response()
+        let mut response = (self.0, Json(ErrorResponse { error: self.1 })).into_response();
+        response.extensions_mut().insert(StructuredApiError);
+        response
     }
 }
 
@@ -149,7 +160,44 @@ pub fn router(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(MAX_PDF_BYTES))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
+        .layer(middleware::from_fn(normalize_error_response))
         .with_state(state)
+}
+
+async fn normalize_error_response(request: Request<Body>, next: Next) -> Response {
+    normalize_framework_error(next.run(request).await)
+}
+
+fn normalize_framework_error(mut response: Response) -> Response {
+    let status = response.status();
+    if !(status.is_client_error() || status.is_server_error())
+        || response.extensions().get::<StructuredApiError>().is_some()
+    {
+        return response;
+    }
+
+    let message = match status {
+        StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY => "Invalid request",
+        StatusCode::NOT_FOUND => "Resource not found",
+        StatusCode::METHOD_NOT_ALLOWED => "Method not allowed",
+        StatusCode::PAYLOAD_TOO_LARGE => "Request body too large",
+        StatusCode::UNSUPPORTED_MEDIA_TYPE => "Unsupported media type",
+        StatusCode::BAD_GATEWAY => "Upstream service unavailable",
+        status if status.is_client_error() => "Request failed",
+        _ => "Internal server error",
+    };
+    let json_response = Json(ErrorResponse {
+        error: message.into(),
+    })
+    .into_response();
+
+    *response.body_mut() = json_response.into_body();
+    response.headers_mut().remove(header::CONTENT_LENGTH);
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    response
 }
 
 /// Generates the OpenAPI 3.1 document for the public HTTP API.
@@ -163,8 +211,8 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
     params(("pdf_hash" = String, Path, description = "SHA-256 hash of the PDF")),
     responses(
         (status = 200, description = "PDF bytes", body = Vec<u8>, content_type = "application/pdf"),
-        (status = 404, description = "PDF not found", body = String, content_type = "text/plain"),
-        (status = 500, description = "Storage error", body = String, content_type = "text/plain")
+        (status = 404, description = "PDF not found", body = ErrorResponse),
+        (status = 500, description = "Storage error", body = ErrorResponse)
     ),
     tag = "documents"
 )]
@@ -205,7 +253,8 @@ async fn download_pdf(
     request_body(content = Vec<u8>, content_type = "application/pdf", description = "PDF document"),
     responses(
         (status = 201, description = "Document processed", body = UploadResponse),
-        (status = 502, description = "Pipeline or workflow error", body = String, content_type = "text/plain")
+        (status = 413, description = "PDF exceeds the upload limit", body = ErrorResponse),
+        (status = 502, description = "Pipeline or workflow error", body = ErrorResponse)
     ),
     tag = "documents"
 )]
@@ -231,8 +280,9 @@ async fn upload_pdf(
     request_body(content = Vec<u8>, content_type = "application/pdf", description = "PDF document"),
     responses(
         (status = 202, description = "Submission accepted", body = SubmissionResponse),
-        (status = 400, description = "Invalid submission", body = String, content_type = "text/plain"),
-        (status = 502, description = "Pipeline or workflow error", body = String, content_type = "text/plain")
+        (status = 400, description = "Invalid submission", body = ErrorResponse),
+        (status = 413, description = "PDF exceeds the upload limit", body = ErrorResponse),
+        (status = 502, description = "Pipeline or workflow error", body = ErrorResponse)
     ),
     tag = "documents"
 )]
@@ -265,8 +315,8 @@ async fn submit_pdf(
     params(("pdf_hash" = String, Path, description = "SHA-256 hash of the PDF")),
     responses(
         (status = 200, description = "Document draft", body = DraftResponse),
-        (status = 404, description = "Draft not found", body = String, content_type = "text/plain"),
-        (status = 500, description = "Persistence error", body = String, content_type = "text/plain")
+        (status = 404, description = "Draft not found", body = ErrorResponse),
+        (status = 500, description = "Persistence error", body = ErrorResponse)
     ),
     tag = "documents"
 )]
@@ -291,7 +341,11 @@ async fn get_draft(
     request_body(content = ManualDocument, description = "Manual document corrections"),
     responses(
         (status = 200, description = "Published document", body = PublishResponse),
-        (status = 502, description = "Workflow error", body = String, content_type = "text/plain")
+        (status = 400, description = "Invalid request body", body = ErrorResponse),
+        (status = 413, description = "Request body exceeds the upload limit", body = ErrorResponse),
+        (status = 415, description = "Unsupported media type", body = ErrorResponse),
+        (status = 422, description = "Invalid request data", body = ErrorResponse),
+        (status = 502, description = "Workflow error", body = ErrorResponse)
     ),
     tag = "documents"
 )]
@@ -320,7 +374,7 @@ async fn publish_draft(
     path = "/documents",
     responses(
         (status = 200, description = "Published document summaries", body = Vec<PublishedDocumentSummary>),
-        (status = 500, description = "Persistence error", body = String, content_type = "text/plain")
+        (status = 500, description = "Persistence error", body = ErrorResponse)
     ),
     tag = "documents"
 )]
@@ -341,7 +395,7 @@ async fn list_documents(
     path = "/documents/requiring-fixing",
     responses(
         (status = 200, description = "Pending review cases", body = Vec<scepa::postgres::ReviewCase>),
-        (status = 500, description = "Persistence error", body = String, content_type = "text/plain")
+        (status = 500, description = "Persistence error", body = ErrorResponse)
     ),
     tag = "review"
 )]
@@ -363,9 +417,10 @@ async fn list_documents_requiring_fixing(
     params(("case_id" = i64, Path, description = "Review case identifier")),
     responses(
         (status = 200, description = "Review case and repair draft", body = RepairDraftResponse),
-        (status = 404, description = "Pending review case not found", body = String, content_type = "text/plain"),
-        (status = 409, description = "Review case has no source PDF", body = String, content_type = "text/plain"),
-        (status = 500, description = "Persistence error", body = String, content_type = "text/plain")
+        (status = 400, description = "Invalid review case identifier", body = ErrorResponse),
+        (status = 404, description = "Pending review case not found", body = ErrorResponse),
+        (status = 409, description = "Review case has no source PDF", body = ErrorResponse),
+        (status = 500, description = "Persistence error", body = ErrorResponse)
     ),
     tag = "review"
 )]
@@ -391,7 +446,11 @@ async fn get_document_requiring_fixing(
     request_body(content = RepairDocumentRequest),
     responses(
         (status = 200, description = "Repaired and published document", body = PublishResponse),
-        (status = 502, description = "Workflow error", body = String, content_type = "text/plain")
+        (status = 400, description = "Invalid request", body = ErrorResponse),
+        (status = 413, description = "Request body exceeds the upload limit", body = ErrorResponse),
+        (status = 415, description = "Unsupported media type", body = ErrorResponse),
+        (status = 422, description = "Invalid request data", body = ErrorResponse),
+        (status = 502, description = "Workflow error", body = ErrorResponse)
     ),
     tag = "review"
 )]
@@ -425,8 +484,8 @@ async fn fix_document(
     params(("pdf_hash" = String, Path, description = "SHA-256 hash of the PDF")),
     responses(
         (status = 200, description = "Published document", body = PublishedDocument),
-        (status = 404, description = "Published document not found", body = String, content_type = "text/plain"),
-        (status = 500, description = "Persistence error", body = String, content_type = "text/plain")
+        (status = 404, description = "Published document not found", body = ErrorResponse),
+        (status = 500, description = "Persistence error", body = ErrorResponse)
     ),
     tag = "documents"
 )]
@@ -450,7 +509,11 @@ async fn get_published_document(
     request_body(content = ManualDocument, description = "Manual document corrections"),
     responses(
         (status = 200, description = "Updated document", body = UpdateDocumentWorkflowResponse),
-        (status = 502, description = "Workflow error", body = String, content_type = "text/plain")
+        (status = 400, description = "Invalid request body", body = ErrorResponse),
+        (status = 413, description = "Request body exceeds the upload limit", body = ErrorResponse),
+        (status = 415, description = "Unsupported media type", body = ErrorResponse),
+        (status = 422, description = "Invalid request data", body = ErrorResponse),
+        (status = 502, description = "Workflow error", body = ErrorResponse)
     ),
     tag = "documents"
 )]
@@ -494,16 +557,165 @@ async fn load_repair(drafts: &PostgresReviewStore, case_id: i64) -> Result<Repai
 }
 
 fn internal(error: impl std::fmt::Display) -> ApiError {
-    ApiError(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+    tracing::error!(error = %error, "API request failed internally");
+    ApiError(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Internal server error".into(),
+    )
 }
 
 fn upstream(error: impl std::fmt::Display) -> ApiError {
-    ApiError(StatusCode::BAD_GATEWAY, error.to_string())
+    tracing::error!(error = %error, "API request failed through an upstream service");
+    ApiError(
+        StatusCode::BAD_GATEWAY,
+        "Upstream service unavailable".into(),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::to_bytes,
+        http::{Method, Request},
+    };
+    use serde_json::{Value, json};
+    use tower::ServiceExt;
+
+    async fn assert_error_response(response: Response, status: StatusCode, message: &str) {
+        assert_eq!(response.status(), status);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).unwrap(),
+            json!({
+                "error": message
+            })
+        );
+    }
+
+    fn rejection_test_router() -> Router {
+        async fn accept_json(Path(_id): Path<u64>, Json(_body): Json<Value>) -> StatusCode {
+            StatusCode::NO_CONTENT
+        }
+
+        Router::new()
+            .route("/items/{id}", post(accept_json))
+            .layer(DefaultBodyLimit::max(16))
+            .layer(middleware::from_fn(normalize_error_response))
+    }
+
+    async fn rejection_response(method: Method, uri: &str, body: &str) -> Response {
+        rejection_test_router()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_owned()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn api_errors_are_json_objects_with_safe_messages() {
+        assert_error_response(
+            ApiError(StatusCode::NOT_FOUND, "PDF not found".into()).into_response(),
+            StatusCode::NOT_FOUND,
+            "PDF not found",
+        )
+        .await;
+        assert_error_response(
+            internal("database password leaked").into_response(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        )
+        .await;
+        assert_error_response(
+            upstream("workflow internals leaked").into_response(),
+            StatusCode::BAD_GATEWAY,
+            "Upstream service unavailable",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn framework_rejections_are_normalized_as_json() {
+        for (method, uri, body, status, message) in [
+            (
+                Method::POST,
+                "/items/1",
+                "{",
+                StatusCode::BAD_REQUEST,
+                "Invalid request",
+            ),
+            (
+                Method::POST,
+                "/items/not-a-number",
+                "{}",
+                StatusCode::BAD_REQUEST,
+                "Invalid request",
+            ),
+            (
+                Method::POST,
+                "/items/1",
+                r#"{"value":"too large"}"#,
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Request body too large",
+            ),
+            (
+                Method::GET,
+                "/missing",
+                "",
+                StatusCode::NOT_FOUND,
+                "Resource not found",
+            ),
+            (
+                Method::GET,
+                "/items/1",
+                "",
+                StatusCode::METHOD_NOT_ALLOWED,
+                "Method not allowed",
+            ),
+        ] {
+            assert_error_response(rejection_response(method, uri, body).await, status, message)
+                .await;
+        }
+
+        let unsupported_media = rejection_test_router()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/items/1")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_error_response(
+            unsupported_media,
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "Unsupported media type",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn normalization_preserves_method_headers() {
+        let response = rejection_response(Method::GET, "/items/1", "").await;
+        assert_eq!(response.headers().get(header::ALLOW).unwrap(), "POST");
+        assert_error_response(
+            response,
+            StatusCode::METHOD_NOT_ALLOWED,
+            "Method not allowed",
+        )
+        .await;
+    }
 
     #[test]
     fn openapi_contains_every_public_operation() {
@@ -571,5 +783,50 @@ mod tests {
             list_items.get("$ref").is_some(),
             "document list items must reference their concrete schema: {list_items}"
         );
+
+        assert!(
+            schemas["ErrorResponse"]["properties"]
+                .get("error")
+                .is_some(),
+            "the API error schema must expose a human-readable error message"
+        );
+
+        for (path, method) in [
+            ("/pdfs", "post"),
+            ("/pdfs/submissions/{workflow_id}", "post"),
+            ("/drafts/{pdf_hash}", "put"),
+            ("/documents/requiring-fixing/{case_id}", "put"),
+            ("/documents/{pdf_hash}", "put"),
+        ] {
+            assert!(
+                document["paths"][path][method]["responses"]
+                    .get("413")
+                    .is_some(),
+                "body-accepting operation {method} {path} must document its size-limit response"
+            );
+        }
+
+        for path in document["paths"].as_object().unwrap().values() {
+            for operation in path.as_object().unwrap().values() {
+                let Some(responses) = operation.get("responses").and_then(Value::as_object) else {
+                    continue;
+                };
+                for (status, response) in responses {
+                    if status.starts_with('2') {
+                        continue;
+                    }
+                    let content = &response["content"];
+                    assert!(
+                        content.get("application/json").is_some(),
+                        "error response {status} is not documented as JSON: {content}"
+                    );
+                    assert_eq!(
+                        content["application/json"]["schema"]["$ref"],
+                        "#/components/schemas/ErrorResponse",
+                        "error response {status} does not use ErrorResponse"
+                    );
+                }
+            }
+        }
     }
 }
