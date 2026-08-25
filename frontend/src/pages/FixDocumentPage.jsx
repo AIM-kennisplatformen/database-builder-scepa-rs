@@ -1,8 +1,5 @@
+import AuthorDisplay from "../components/AuthorDisplay";
+
 export default function FixDocumentPage() {
-  return (
-    <div className="rounded-lg bg-white p-8 shadow-md text-primary">
-      <h2 className="text-xl font-bold">Fix documents</h2>
-      <p className="text-xs text-muted-foreground italic">Coming soon.</p>
-    </div>
-  );
+  return <div className="rounded-lg bg-white p-2 shadow-md text-primary"></div>;
 }
