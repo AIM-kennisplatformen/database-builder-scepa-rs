@@ -1,0 +1,9 @@
+/target
+/backend/target
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.next/
+/.sources/
+.env
+!.env.example
+/.scannerwork
