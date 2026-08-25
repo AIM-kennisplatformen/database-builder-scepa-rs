@@ -11,6 +11,7 @@ backend/                 Rust workspace
   crates/api/            Axum API
   crates/cli/            Clap command-line client
   crates/core/           Shared pipeline, models, and persistence
+mcp/                     Standalone literature retrieval MCP project
 frontend/                React operator UI
 compose.yaml             Default development stack with hot reloading
 compose.development.yaml Development tools extension
@@ -69,6 +70,7 @@ The stack exposes:
 - TypeDB gRPC: `localhost:1729`
 - TypeDB HTTP: `http://localhost:8000`
 - TypeDB MCP with `tools`: `http://localhost:8001`
+- SCEPA literature MCP: `http://localhost:8002/mcp`
 - Qdrant HTTP/gRPC: `localhost:6333` / `localhost:6334`
 - SonarQube with `tools`: `http://localhost:9000`
 
@@ -147,3 +149,19 @@ scepa-cli single --identifier 2AEJBJL6-debug .sources/pdfs/2AEJBJL6.pdf
 
 The `scepa-api` binary only runs the HTTP endpoint; command-line operations live
 in the separate `scepa-cli` crate.
+
+## Literature MCP
+
+The self-contained project under `mcp/` exposes authenticated Streamable HTTP at
+`/mcp`. `search_literature` first obtains eligible PDF hashes from TypeDB using
+publication-date, document-type, and organization filters, similarity-searches
+`4 × SEARCH_RESULT_COUNT` source passages in Qdrant, resolves their linked
+combined passages, and reranks them locally. `get_document_metadata` accepts one
+or more hashes returned by the search tool. Hashes are opaque MCP chaining values,
+not user-facing citations.
+
+Set `MCP_BEARER_TOKEN` before starting the service. The unquantized
+`cross-encoder/ms-marco-MiniLM-L6-v2` ONNX model is downloaded on first startup
+and retained in the `mcp_model_cache` volume. The model ID, revision, batch size,
+and final result count are configurable through the variables in `.env.example`.
+See `mcp/README.md` for standalone setup and deployment instructions.

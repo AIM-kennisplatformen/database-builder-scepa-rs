@@ -50,6 +50,45 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  mcp:
+    build:
+      context: ./mcp
+      target: development
+    environment:
+      RUST_LOG: ${RUST_LOG:-scepa_mcp=debug}
+      MCP_ADDRESS: 0.0.0.0:8002
+      MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN}
+      TYPEDB_ADDRESS: typedb:1729
+      TYPEDB_DATABASE: ${TYPEDB_DATABASE}
+      TYPEDB_USERNAME: ${TYPEDB_USERNAME}
+      TYPEDB_PASSWORD: ${TYPEDB_PASSWORD}
+      QDRANT_URL: http://qdrant:6334
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-scepa}
+      QDRANT_VECTOR_SIZE: ${QDRANT_VECTOR_SIZE:-4096}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      OPENAI_HOST: ${OPENAI_HOST:-https://api.tokenfactory.nebius.com/v1/}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-8B}
+      SEARCH_RESULT_COUNT: ${SEARCH_RESULT_COUNT:-5}
+      RERANK_MODEL_ID: ${RERANK_MODEL_ID:-cross-encoder/ms-marco-MiniLM-L6-v2}
+      RERANK_MODEL_REVISION: ${RERANK_MODEL_REVISION:-main}
+      RERANK_BATCH_SIZE: ${RERANK_BATCH_SIZE:-32}
+      HF_HOME: /models/huggingface
+    ports:
+      - "${MCP_PORT:-8002}:8002"
+    volumes:
+      - ./mcp:/app
+      - mcp_target:/app/target
+      - cargo_registry:/usr/local/cargo/registry
+      - cargo_git:/usr/local/cargo/git
+      - mcp_model_cache:/models/huggingface
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      typedb:
+        condition: service_healthy
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend
@@ -174,6 +213,8 @@ volumes:
   cargo_git:
   cargo_registry:
   frontend_node_modules:
+  mcp_model_cache:
+  mcp_target:
   garage_data:
   garage_meta:
   postgres_data:
