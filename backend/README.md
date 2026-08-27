@@ -33,30 +33,31 @@ uploads to `SCEPA_API_URL` (default `http://localhost:3000`).
 
 ## Database import and export
 
-Export a TypeDB database with a non-interactive console command:
+TypeDB Console must be installed and the `typedb` executable must be available
+on `PATH`. Export a database with a non-interactive console command:
 
 ```bash
-docker compose exec typedb typedb console \
+mkdir -p typedb-backup
+typedb console \
   --address localhost:1729 \
   --username admin \
   --password password \
   --tls-disabled \
-  --command="database export scepa /tmp/schema.typeql /tmp/data.typedb"
+  --command="database export scepa typedb-backup/schema.typeql typedb-backup/data.typedb"
 ```
 
 Import it with:
 
 ```bash
-docker compose exec typedb typedb console \
+typedb console \
   --address localhost:1729 \
   --username admin \
   --password password \
   --tls-disabled \
-  --command="database import scepa /tmp/schema.typeql /tmp/data.typedb"
+  --command="database import scepa typedb-backup/schema.typeql typedb-backup/data.typedb"
 ```
 
-The schema and data paths are inside the TypeDB container. The target database
-must not already exist when importing.
+The target database must not already exist when importing.
 
 Migrate a local Qdrant collection to Qdrant Cloud with:
 
