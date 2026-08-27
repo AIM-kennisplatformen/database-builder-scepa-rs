@@ -31,5 +31,44 @@ backfill is performed. A single oversized passage is kept whole.
 HTTP calls (default `4`). The CLI sends
 uploads to `SCEPA_API_URL` (default `http://localhost:3000`).
 
+## Database import and export
+
+Export a TypeDB database with a non-interactive console command:
+
+```bash
+docker compose exec typedb typedb console \
+  --address localhost:1729 \
+  --username admin \
+  --password password \
+  --tls-disabled \
+  --command="database export scepa /tmp/schema.typeql /tmp/data.typedb"
+```
+
+Import it with:
+
+```bash
+docker compose exec typedb typedb console \
+  --address localhost:1729 \
+  --username admin \
+  --password password \
+  --tls-disabled \
+  --command="database import scepa /tmp/schema.typeql /tmp/data.typedb"
+```
+
+The schema and data paths are inside the TypeDB container. The target database
+must not already exist when importing.
+
+Migrate a local Qdrant collection to Qdrant Cloud with:
+
+```bash
+docker run --net=host registry.cloud.qdrant.io/library/qdrant-migration \
+  --source-url http://localhost:6333 \
+  --target-url https://your-cloud-cluster.qdrant.io \
+  --target-api-key "your-api-key" \
+  --collection my_collection
+```
+
+Replace the target URL, API key, and collection name for the destination.
+
 Runtime services and environment variables are managed from the repository
 root with `docker compose` and `.env`.

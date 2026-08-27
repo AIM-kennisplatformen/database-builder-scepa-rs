@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt};
+use thiserror::Error as ThisError;
 
 use crate::pipeline::{
     FailureDisposition, PipelinePhase, PipelineService, ReviewArtifact, ReviewStore,
@@ -18,6 +19,20 @@ const TEI_COORDINATE_ELEMENTS: &[&str] = &[
     "formula",
     "persName",
 ];
+
+const TERMINAL_GROBID_ERROR_CODES: &[&str] = &["NO_BLOCKS", "BAD_INPUT_DATA"];
+
+#[derive(Debug, ThisError)]
+enum GrobidRequestError {
+    #[error(transparent)]
+    Transport(#[from] reqwest::Error),
+
+    #[error("Grobid returned HTTP {status}: {body}")]
+    Response {
+        status: reqwest::StatusCode,
+        body: String,
+    },
+}
 
 /// Boundary around Grobid's HTTP API.
 ///
@@ -71,21 +86,139 @@ impl GrobidClient for HttpGrobidClient {
             .post(&self.endpoint)
             .multipart(form)
             .send()
-            .await?
-            .error_for_status()?;
+            .await
+            .map_err(GrobidRequestError::Transport)?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(GrobidRequestError::Transport)?;
 
-        Ok(response.text().await?)
+        if !status.is_success() {
+            return Err(GrobidRequestError::Response { status, body }.into());
+        }
+
+        Ok(body)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::TEI_COORDINATE_ELEMENTS;
+    use super::{GrobidRequestError, TEI_COORDINATE_ELEMENTS, classify_grobid_request_error};
+    use crate::pipeline::FailureDisposition;
+    use reqwest::StatusCode;
 
     #[test]
     fn requests_coordinates_for_each_text_chunk_level() {
         assert!(TEI_COORDINATE_ELEMENTS.contains(&"p"));
         assert!(TEI_COORDINATE_ELEMENTS.contains(&"s"));
+    }
+
+    #[test]
+    fn known_grobid_input_errors_are_terminal_even_on_server_errors() {
+        for code in ["NO_BLOCKS", "BAD_INPUT_DATA"] {
+            let error = GrobidRequestError::Response {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                body: format!("GrobidException: [{code}] document cannot be parsed"),
+            };
+
+            assert_eq!(
+                classify_grobid_request_error(&error),
+                FailureDisposition::Terminal
+            );
+        }
+    }
+
+    #[test]
+    fn unrelated_server_errors_remain_retryable() {
+        let error = GrobidRequestError::Response {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            body: "temporary worker failure".into(),
+        };
+
+        assert_eq!(
+            classify_grobid_request_error(&error),
+            FailureDisposition::Retryable
+        );
+    }
+
+    #[test]
+    fn throttling_and_request_timeouts_remain_retryable() {
+        for status in [StatusCode::REQUEST_TIMEOUT, StatusCode::TOO_MANY_REQUESTS] {
+            let error = GrobidRequestError::Response {
+                status,
+                body: String::new(),
+            };
+
+            assert_eq!(
+                classify_grobid_request_error(&error),
+                FailureDisposition::Retryable
+            );
+        }
+    }
+
+    #[test]
+    fn other_client_errors_are_terminal() {
+        let error = GrobidRequestError::Response {
+            status: StatusCode::BAD_REQUEST,
+            body: "invalid request".into(),
+        };
+
+        assert_eq!(
+            classify_grobid_request_error(&error),
+            FailureDisposition::Terminal
+        );
+    }
+
+    #[tokio::test]
+    async fn connection_failures_remain_retryable() {
+        let error = reqwest::Client::new()
+            .get("http://127.0.0.1:0")
+            .send()
+            .await
+            .expect_err("port zero must reject connections");
+        assert!(error.is_connect());
+
+        assert_eq!(
+            classify_grobid_request_error(&GrobidRequestError::Transport(error)),
+            FailureDisposition::Retryable
+        );
+    }
+}
+
+fn classify_grobid_request_error(error: &GrobidRequestError) -> FailureDisposition {
+    match error {
+        GrobidRequestError::Transport(error) => {
+            if error.is_connect() || error.is_timeout() {
+                return FailureDisposition::Retryable;
+            }
+
+            error
+                .status()
+                .map(classify_grobid_status)
+                .unwrap_or(FailureDisposition::Terminal)
+        }
+        GrobidRequestError::Response { status, body } => {
+            if TERMINAL_GROBID_ERROR_CODES
+                .iter()
+                .any(|code| body.contains(code))
+            {
+                FailureDisposition::Terminal
+            } else {
+                classify_grobid_status(*status)
+            }
+        }
+    }
+}
+
+fn classify_grobid_status(status: reqwest::StatusCode) -> FailureDisposition {
+    if status.is_server_error()
+        || status == reqwest::StatusCode::REQUEST_TIMEOUT
+        || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+    {
+        FailureDisposition::Retryable
+    } else {
+        FailureDisposition::Terminal
     }
 }
 
@@ -151,24 +284,23 @@ where
             return FailureDisposition::Terminal;
         }
 
-        let Some(error) = error.downcast_inner_ref::<reqwest::Error>() else {
-            return FailureDisposition::Terminal;
-        };
-
-        if error.is_connect() || error.is_timeout() {
-            return FailureDisposition::Retryable;
+        if let Some(error) = error.downcast_inner_ref::<GrobidRequestError>() {
+            return classify_grobid_request_error(error);
         }
 
-        match error.status() {
-            Some(status)
-                if status.is_server_error()
-                    || status == reqwest::StatusCode::REQUEST_TIMEOUT
-                    || status == reqwest::StatusCode::TOO_MANY_REQUESTS =>
-            {
-                FailureDisposition::Retryable
-            }
-            _ => FailureDisposition::Terminal,
-        }
+        error
+            .downcast_inner_ref::<reqwest::Error>()
+            .map(|error| {
+                if error.is_connect() || error.is_timeout() {
+                    FailureDisposition::Retryable
+                } else {
+                    error
+                        .status()
+                        .map(classify_grobid_status)
+                        .unwrap_or(FailureDisposition::Terminal)
+                }
+            })
+            .unwrap_or(FailureDisposition::Terminal)
     }
 
     async fn validate_input(
