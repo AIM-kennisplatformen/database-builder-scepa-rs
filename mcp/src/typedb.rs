@@ -92,6 +92,7 @@ impl MetadataStore {
                     document_id: row_string(&row, "document_id")?,
                     document_type: row_label(&row, "document_type")?,
                     title: row_string(&row, "title")?,
+                    ieee_reference: String::new(),
                     doi: None,
                     isbn: Vec::new(),
                     persons: Vec::new(),
@@ -118,6 +119,9 @@ impl MetadataStore {
         self.add_affiliations(pdf_hashes, &mut documents).await?;
         self.add_publications(pdf_hashes, &parties, &mut documents)
             .await?;
+        for document in documents.values_mut() {
+            document.refresh_ieee_reference();
+        }
         Ok(documents)
     }
 

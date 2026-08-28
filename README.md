@@ -155,13 +155,15 @@ in the separate `scepa-cli` crate.
 The self-contained project under `mcp/` exposes authenticated Streamable HTTP at
 `/mcp`. `search_literature` first obtains eligible PDF hashes from TypeDB using
 publication-date, document-type, and organization filters, similarity-searches
-`4 × SEARCH_RESULT_COUNT` source passages in Qdrant, resolves their linked
-combined passages, and reranks them locally. `get_document_metadata` accepts one
-or more hashes returned by the search tool. Hashes are opaque MCP chaining values,
-not user-facing citations.
+`4 × top_k` source passages in Qdrant, resolves their linked combined passages,
+and reranks them locally. Search responses always include bibliographic metadata
+and deterministic IEEE references keyed by each result's `pdf_hash`. Hashes are
+opaque association keys, not user-facing citations.
 
 Set `MCP_BEARER_TOKEN` before starting the service. The unquantized
 `cross-encoder/ms-marco-MiniLM-L6-v2` ONNX model is downloaded on first startup
 and retained in the `mcp_model_cache` volume. The model ID, revision, batch size,
-and final result count are configurable through the variables in `.env.example`.
-See `mcp/README.md` for standalone setup and deployment instructions.
+and other service settings are configurable through the variables in
+`.env.example`. The search tool's optional `top_k` parameter defaults to 30 and
+accepts values from 1 through 50. See `mcp/README.md` for standalone setup and
+deployment instructions.

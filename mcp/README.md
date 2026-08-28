@@ -9,9 +9,13 @@ The server exposes:
 - Streamable HTTP MCP at `/mcp`, protected by a static bearer token.
 - `search_literature`, which filters document hashes in TypeDB, searches source
   passages in Qdrant, expands their linked combined passages, and reranks them
-  with a local ONNX cross-encoder.
-- `get_document_metadata`, which resolves one or more opaque `pdf_hash` handles
-  to TypeDB metadata.
+  with a local ONNX cross-encoder. Its optional publication and organization
+  filters are flat tool parameters for broad model compatibility. Every search
+  includes TypeDB metadata and a deterministic `ieee_reference` for each
+  represented document. Every passage includes its internal normalized reranker
+  score, which MCP clients must never expose to users. The optional `top_k`
+  parameter controls the number of returned passages, defaults to 30, and
+  accepts values from 1 through 50.
 
 ## Run locally
 

@@ -34,7 +34,10 @@ use tracing_subscriber::EnvFilter;
 use crate::reranker::OnnxReranker;
 use crate::{
     embedding::EmbeddingClient,
-    models::{LiteratureFilters, LiteratureSearchResponse, MetadataResponse},
+    models::{
+        DocumentTypeFilter, LiteratureFilters, LiteratureSearchResponse, OrganizationFilter,
+        OrganizationRoleFilter, OrganizationTypeFilter, PublicationDateFilter,
+    },
     qdrant::PassageStore,
     search::{LiteratureSearchService, SearchError},
     typedb::MetadataStore,
@@ -47,27 +50,84 @@ struct LiteratureMcp {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct SearchLiteratureParameters {
-    /// Natural-language literature query.
+    /// Natural-language question or topic used for semantic passage retrieval.
     query: String,
-    /// Optional TypeDB-backed publication metadata filters.
+    /// Maximum number of reranked passages to return. Defaults to 30. Valid values are 1 through 50.
+    #[serde(default = "default_top_k")]
+    #[schemars(range(min = 1, max = 50))]
+    top_k: usize,
+    /// Inclusive publication start date in YYYY-MM-DD format. Omit it unless the user requested a lower date bound.
+    publication_date_from: Option<chrono::NaiveDate>,
+    /// Inclusive publication end date in YYYY-MM-DD format. Omit it unless the user requested an upper date bound.
+    publication_date_to: Option<chrono::NaiveDate>,
+    /// Exact document types to include: document (base type only), research_paper, report, or book. Values are ORed; omit or pass an empty list for no document-type restriction.
     #[serde(default)]
-    filters: LiteratureFilters,
-    /// Include TypeDB metadata for the documents represented in the results.
+    document_types: Vec<DocumentTypeFilter>,
+    /// Organization-name substrings associated with a document. Values are ORed; omit or pass an empty list for no name restriction.
     #[serde(default)]
-    include_metadata: bool,
+    organization_names: Vec<String>,
+    /// How an organization is related to a document: publisher, affiliation, contributor, or any. Values are ORed; omitted or empty means any role.
+    #[serde(default)]
+    organization_roles: Vec<OrganizationRoleFilter>,
+    /// Organization types to include: organization, institution, government_institution, educational_institution, nonprofit_institution, or publisher. Parent types include their subtypes; values are ORed. Omit or pass an empty list for no type restriction.
+    #[serde(default)]
+    organization_types: Vec<OrganizationTypeFilter>,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
-struct GetDocumentMetadataParameters {
-    /// One or more opaque pdf_hash values returned by another SCEPA MCP tool.
-    pdf_hashes: Vec<String>,
+const DEFAULT_TOP_K: usize = 30;
+
+fn default_top_k() -> usize {
+    DEFAULT_TOP_K
+}
+
+impl SearchLiteratureParameters {
+    fn filters(&self) -> LiteratureFilters {
+        let publication_date = (self.publication_date_from.is_some()
+            || self.publication_date_to.is_some())
+        .then_some(PublicationDateFilter {
+            from: self.publication_date_from,
+            to: self.publication_date_to,
+        });
+        let organization = (!self.organization_names.is_empty()
+            || !self.organization_roles.is_empty()
+            || !self.organization_types.is_empty())
+        .then(|| OrganizationFilter {
+            names: self.organization_names.clone(),
+            roles: self.organization_roles.clone(),
+            types: self.organization_types.clone(),
+        });
+        LiteratureFilters {
+            publication_date,
+            document_types: self.document_types.clone(),
+            organization,
+        }
+    }
 }
 
 #[tool_router]
 impl LiteratureMcp {
-    #[tool(
-        description = "Search the published literature. The returned pdf_hash is opaque and must only be passed to other SCEPA MCP tools such as get_document_metadata. Filters are resolved in TypeDB before source-passage similarity search; linked combined passages are then reranked."
-    )]
+    #[tool(description = r#"
+        Use case:
+        Search published literature for relevant evidence passages and citation metadata.
+
+        Input arguments:
+            query is the natural-language search question or topic.
+            top_k is the result limit from 1 through 50 and defaults to 30.
+            publication_date_from is an optional inclusive YYYY-MM-DD lower bound.
+            publication_date_to is an optional inclusive YYYY-MM-DD upper bound.
+            document_types accepts document, research_paper, report, and book.
+            organization_names accepts organization-name substrings.
+            organization_roles accepts any, publisher, affiliation, and contributor.
+            organization_types accepts organization, institution, government_institution, educational_institution, nonprofit_institution, and publisher.
+            Filter categories use AND while values within a category use OR.
+            Only set publication or organization filters when the user requests them.
+
+        Output arguments:
+            results contains reranked passage text, an opaque pdf_hash, and an internal score from 0.0 through 1.0.
+            metadata_by_pdf_hash contains bibliographic metadata and ieee_reference citations keyed by pdf_hash.
+            usage_note explains restrictions on internal fields.
+            Copy ieee_reference verbatim; scores and pdf_hash values must never be shown to the user.
+        "#)]
     async fn search_literature(
         &self,
         Parameters(parameters): Parameters<SearchLiteratureParameters>,
@@ -76,22 +136,9 @@ impl LiteratureMcp {
         if query.is_empty() {
             return Err(McpError::invalid_params("query must not be empty", None));
         }
+        let filters = parameters.filters();
         self.search
-            .search(query, &parameters.filters, parameters.include_metadata)
-            .await
-            .map(Json)
-            .map_err(tool_error)
-    }
-
-    #[tool(
-        description = "Retrieve TypeDB document metadata for one or more opaque pdf_hash values returned by SCEPA MCP tools. Do not present pdf_hash as a user-facing citation or document identifier."
-    )]
-    async fn get_document_metadata(
-        &self,
-        Parameters(parameters): Parameters<GetDocumentMetadataParameters>,
-    ) -> Result<Json<MetadataResponse>, McpError> {
-        self.search
-            .metadata(&parameters.pdf_hashes)
+            .search(query, &filters, parameters.top_k)
             .await
             .map(Json)
             .map_err(tool_error)
@@ -101,7 +148,12 @@ impl LiteratureMcp {
 #[tool_handler(
     name = "scepa-literature",
     version = "0.1.0",
-    instructions = "Use search_literature for evidence passages. Treat pdf_hash values as opaque handles only and pass them to get_document_metadata when bibliographic details are needed."
+    instructions = r#"
+    Use search_literature to retrieve evidence passages and their bibliographic metadata.
+    Copy ieee_reference verbatim for citations.
+    Treat pdf_hash values only as opaque keys that associate passages with metadata; never present them as citations or document identifiers.
+    Use scores only to assess the relative relevance of returned passages; never show scores to the user.
+    "#
 )]
 impl ServerHandler for LiteratureMcp {}
 
@@ -160,16 +212,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await
     .map_err(internal_error)?;
-    let search = Arc::new(
-        LiteratureSearchService::new(
-            typedb,
-            qdrant,
-            embeddings,
-            reranker,
-            positive_usize("SEARCH_RESULT_COUNT", 5)?,
-        )
-        .map_err(internal_error)?,
-    );
+    let search = Arc::new(LiteratureSearchService::new(
+        typedb, qdrant, embeddings, reranker,
+    ));
     let handler = LiteratureMcp { search };
     let config = StreamableHttpServerConfig::default()
         .with_legacy_session_mode(false)
@@ -267,5 +312,110 @@ mod tests {
         let token = BearerToken::new("secret");
         assert!(token.matches("secret"));
         assert!(!token.matches("other"));
+    }
+
+    #[test]
+    fn flat_search_parameters_build_nested_service_filters() {
+        let parameters = SearchLiteratureParameters {
+            query: "energy poverty".into(),
+            top_k: DEFAULT_TOP_K,
+            publication_date_from: chrono::NaiveDate::from_ymd_opt(2020, 1, 1),
+            publication_date_to: None,
+            document_types: vec![DocumentTypeFilter::ResearchPaper],
+            organization_names: vec!["Example University".into()],
+            organization_roles: vec![OrganizationRoleFilter::Affiliation],
+            organization_types: vec![OrganizationTypeFilter::EducationalInstitution],
+        };
+
+        assert_eq!(
+            parameters.filters(),
+            LiteratureFilters {
+                publication_date: Some(PublicationDateFilter {
+                    from: chrono::NaiveDate::from_ymd_opt(2020, 1, 1),
+                    to: None,
+                }),
+                document_types: vec![DocumentTypeFilter::ResearchPaper],
+                organization: Some(OrganizationFilter {
+                    names: vec!["Example University".into()],
+                    roles: vec![OrganizationRoleFilter::Affiliation],
+                    types: vec![OrganizationTypeFilter::EducationalInstitution],
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn search_parameter_schema_documents_top_k_and_has_no_metadata_toggle() {
+        let schema = serde_json::to_value(schemars::schema_for!(SearchLiteratureParameters))
+            .expect("schema should serialize");
+        let properties = schema
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .expect("schema should have properties");
+
+        assert!(!properties.contains_key("include_metadata"));
+        for parameter in [
+            "query",
+            "top_k",
+            "publication_date_from",
+            "publication_date_to",
+            "document_types",
+            "organization_names",
+            "organization_roles",
+            "organization_types",
+        ] {
+            assert!(
+                properties
+                    .get(parameter)
+                    .and_then(|property| property.get("description"))
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|description| !description.is_empty()),
+                "{parameter} should have a description"
+            );
+        }
+        let top_k = properties.get("top_k").expect("top_k should be exposed");
+        assert_eq!(top_k.get("default"), Some(&serde_json::json!(30)));
+        assert_eq!(top_k.get("minimum"), Some(&serde_json::json!(1)));
+        assert_eq!(top_k.get("maximum"), Some(&serde_json::json!(50)));
+        assert!(
+            top_k
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|description| description.contains("reranked passages"))
+        );
+    }
+
+    #[test]
+    fn omitted_top_k_deserializes_to_thirty() {
+        let parameters: SearchLiteratureParameters =
+            serde_json::from_value(serde_json::json!({ "query": "energy poverty" }))
+                .expect("minimal search parameters should deserialize");
+
+        assert_eq!(parameters.top_k, DEFAULT_TOP_K);
+    }
+
+    #[test]
+    fn top_k_accepts_only_the_documented_range() {
+        assert!(crate::search::validate_top_k(1).is_ok());
+        assert!(crate::search::validate_top_k(50).is_ok());
+        assert!(crate::search::validate_top_k(0).is_err());
+        assert!(crate::search::validate_top_k(51).is_err());
+    }
+
+    #[test]
+    fn router_exposes_only_the_documented_literature_search_tool() {
+        let tools = LiteratureMcp::tool_router().list_all();
+
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "search_literature");
+        let description = tools[0]
+            .description
+            .as_deref()
+            .expect("search tool should have a description");
+        assert!(description.contains("Use case:"));
+        assert!(description.contains("Input arguments:"));
+        assert!(description.contains("Output arguments:"));
+        assert!(description.contains("score"));
+        assert!(description.contains("must never be shown to the user"));
     }
 }

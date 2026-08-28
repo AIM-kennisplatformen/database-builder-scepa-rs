@@ -1,11 +1,11 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use async_trait::async_trait;
 use thiserror::Error;
 
 use crate::{
     embedding::EmbeddingClient,
-    models::{LiteratureFilters, LiteratureResult, LiteratureSearchResponse, MetadataResponse},
+    models::{LiteratureFilters, LiteratureResult, LiteratureSearchResponse},
     qdrant::PassageStore,
     reranker::OnnxReranker,
     typedb::{MetadataStore, validate_filters},
@@ -36,7 +36,6 @@ pub struct LiteratureSearchService {
     passages: PassageStore,
     embeddings: EmbeddingClient,
     reranker: OnnxReranker,
-    result_count: usize,
 }
 
 impl LiteratureSearchService {
@@ -45,42 +44,35 @@ impl LiteratureSearchService {
         passages: PassageStore,
         embeddings: EmbeddingClient,
         reranker: OnnxReranker,
-        result_count: usize,
-    ) -> Result<Self, SearchError> {
-        if result_count == 0 || result_count.checked_mul(4).is_none() {
-            return Err(SearchError::InvalidInput(
-                "SEARCH_RESULT_COUNT must be a positive value that can be multiplied by four"
-                    .into(),
-            ));
-        }
-        Ok(Self {
+    ) -> Self {
+        Self {
             metadata,
             passages,
             embeddings,
             reranker,
-            result_count,
-        })
+        }
     }
 
     pub async fn search(
         &self,
         query: &str,
         filters: &LiteratureFilters,
-        include_metadata: bool,
+        top_k: usize,
     ) -> Result<LiteratureSearchResponse, SearchError> {
+        validate_top_k(top_k)?;
         validate_filters(filters)?;
         let eligible = self.metadata.eligible_pdf_hashes(filters).await?;
         if eligible.is_empty() {
             return Ok(LiteratureSearchResponse {
                 results: Vec::new(),
                 usage_note: usage_note().into(),
-                metadata_by_pdf_hash: include_metadata.then(BTreeMap::new),
+                metadata_by_pdf_hash: Default::default(),
             });
         }
         let query_vector = self.embeddings.embed_query(query).await?;
         let candidates = self
             .passages
-            .combined_candidates(query_vector, &eligible, self.result_count * 4)
+            .combined_candidates(query_vector, &eligible, top_k * 4)
             .await?;
         let texts = candidates
             .iter()
@@ -98,77 +90,54 @@ impl LiteratureSearchService {
                 candidates.len()
             )));
         }
-        let results = rank_candidates(candidates, scores, self.result_count)
+        let results = rank_candidates(candidates, scores, top_k)
             .into_iter()
-            .map(|candidate| LiteratureResult {
+            .map(|(candidate, score)| LiteratureResult {
                 text: candidate.text,
                 pdf_hash: candidate.pdf_hash,
+                score,
             })
             .collect::<Vec<_>>();
-        let metadata_by_pdf_hash = if include_metadata {
-            let hashes = results
-                .iter()
-                .map(|result| result.pdf_hash.clone())
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect::<Vec<_>>();
-            Some(self.metadata.document_metadata(&hashes).await?)
-        } else {
-            None
-        };
+        let hashes = results
+            .iter()
+            .map(|result| result.pdf_hash.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let metadata_by_pdf_hash = self.metadata.document_metadata(&hashes).await?;
         Ok(LiteratureSearchResponse {
             results,
             usage_note: usage_note().into(),
             metadata_by_pdf_hash,
         })
     }
+}
 
-    pub async fn metadata(&self, hashes: &[String]) -> Result<MetadataResponse, SearchError> {
-        let requested = hashes
-            .iter()
-            .map(|hash| hash.trim())
-            .filter(|hash| !hash.is_empty())
-            .map(str::to_owned)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        if requested.is_empty() {
-            return Err(SearchError::InvalidInput(
-                "pdf_hashes must contain at least one non-empty value".into(),
-            ));
-        }
-        let documents = self.metadata.document_metadata(&requested).await?;
-        let not_found = requested
-            .into_iter()
-            .filter(|hash| !documents.contains_key(hash))
-            .collect();
-        Ok(MetadataResponse {
-            documents,
-            not_found,
-        })
+pub fn validate_top_k(top_k: usize) -> Result<(), SearchError> {
+    if !(1..=50).contains(&top_k) {
+        return Err(SearchError::InvalidInput(
+            "top_k must be between 1 and 50".into(),
+        ));
     }
+    Ok(())
 }
 
 fn usage_note() -> &'static str {
-    "pdf_hash is an opaque identifier intended only for calls to other SCEPA MCP tools, such as get_document_metadata."
+    "pdf_hash is an opaque key that associates each passage with its entry in metadata_by_pdf_hash; it is not a user-facing citation or document identifier."
 }
 
 fn rank_candidates(
     candidates: Vec<crate::models::CombinedPassageCandidate>,
     scores: Vec<f32>,
     limit: usize,
-) -> Vec<crate::models::CombinedPassageCandidate> {
+) -> Vec<(crate::models::CombinedPassageCandidate, f32)> {
     let mut ranked = candidates.into_iter().zip(scores).collect::<Vec<_>>();
     ranked.sort_by(|(left, left_score), (right, right_score)| {
         right_score
             .total_cmp(left_score)
             .then_with(|| left.point_id.cmp(&right.point_id))
     });
-    ranked
-        .into_iter()
-        .take(limit)
-        .map(|(candidate, _)| candidate)
-        .collect()
+    ranked.into_iter().take(limit).collect()
 }
 
 #[cfg(test)]
@@ -192,9 +161,9 @@ mod tests {
         assert_eq!(
             ranked
                 .into_iter()
-                .map(|candidate| candidate.point_id)
+                .map(|(candidate, score)| (candidate.point_id, score))
                 .collect::<Vec<_>>(),
-            ["a", "c"]
+            [("a".into(), 0.9), ("c".into(), 0.9)]
         );
     }
 }
