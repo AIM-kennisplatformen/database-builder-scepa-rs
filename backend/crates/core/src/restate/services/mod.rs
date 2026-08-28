@@ -5,6 +5,7 @@ mod garage;
 mod grobid;
 mod tei;
 mod typedb;
+mod vector;
 
 use restate_sdk::prelude::{HandlerError, HandlerResult, TerminalError};
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,9 @@ pub use tei::{TeiRestateService, TeiRestateServiceClient};
 pub use typedb::{
     TypeDbExecuteRequest, TypeDbRestateService, TypeDbRestateServiceClient, TypeDbUpdateRequest,
     TypeDbUpdateResponse,
+};
+pub use vector::{
+    VectorExecuteRequest, VectorRestateService, VectorRestateServiceClient, VectorUpdateRequest,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
