@@ -1,3 +1,4 @@
+import { ChevronDown } from "lucide-react";
 import AuthorDisplay from "../components/AuthorDisplay";
 import PdfViewer from "../components/PdfViewer";
 import UpdateDocumentList from "./UpdateDocumentListPage";
@@ -45,6 +46,8 @@ export default function UpdateDocumentPage({}) {
   const [currentStep, setCurrentStep] = useState(1);
   const [documentData, setDocumentData] = useState(null);
   const [error, setError] = useState(null);
+  const [isBibliographyOpen, setIsBibliographyOpen] = useState(true);
+  const [isAuthorsOpen, setIsAuthorsOpen] = useState(true);
 
   useEffect(() => {
     if (pdf_hash) {
@@ -73,41 +76,50 @@ export default function UpdateDocumentPage({}) {
         {bibliography && (
           <div className="flex flex-col gap-6">
             <div className="flex flex-col gap-4">
-              {BIBLIOGRAPHY_FIELDS.map((field) => (
-                <Field
-                  key={field.key}
-                  label={field.label}
-                  type={field.type}
-                  defaultValue={bibliography[field.key]}
+              <div
+                className="flex flex-row gap-1 cursor-pointer select-none"
+                onClick={() => setIsBibliographyOpen((open) => !open)}
+              >
+                <ChevronDown
+                  className={`text-primary transition-transform ${
+                    isBibliographyOpen ? "" : "-rotate-90"
+                  }`}
                 />
-              ))}
+                <h3 className="text-primary font-bold">Bibliography Fields</h3>
+              </div>
+              {isBibliographyOpen &&
+                BIBLIOGRAPHY_FIELDS.map((field) => (
+                  <Field
+                    key={field.key}
+                    label={field.label}
+                    type={field.type}
+                    defaultValue={bibliography[field.key]}
+                  />
+                ))}
             </div>
 
             <div className="flex flex-col gap-2">
-              <span className="font-medium text-sm text-primary">Authors</span>
-              {(bibliography.authors ?? []).map((author, index) => (
-                <AuthorDisplay key={index} author={author} />
-              ))}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <span className="font-medium text-sm text-primary">
-                Identifiers
-              </span>
-              {(bibliography.identifiers ?? []).map((identifier, index) => (
-                <div
-                  key={index}
-                  className="flex flex-col gap-2 rounded border border-border p-2"
-                >
-                  {IDENTIFIER_FIELDS.map((field) => (
-                    <Field
-                      key={field.key}
-                      label={field.label}
-                      defaultValue={identifier[field.key]}
-                    />
+              <div
+                className="flex flex-row gap-1 cursor-pointer select-none"
+                onClick={() => setIsAuthorsOpen((open) => !open)}
+              >
+                <ChevronDown
+                  className={`text-primary transition-transform ${
+                    isAuthorsOpen ? "" : "-rotate-90"
+                  }`}
+                />
+                <h3 className="text-primary font-bold">Authors</h3>
+              </div>
+              {isAuthorsOpen && (
+                <>
+                  <span className="font-medium text-sm text-primary">
+                    Authors
+                  </span>
+                  {(bibliography.authors ?? []).map((author, index) => (
+                    <AuthorDisplay key={index} author={author} />
                   ))}
-                </div>
-              ))}
+                </>
+              )}
             </div>
           </div>
         )}
