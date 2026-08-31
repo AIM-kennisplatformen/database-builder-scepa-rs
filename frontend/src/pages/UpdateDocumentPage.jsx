@@ -22,25 +22,6 @@ const CONTRIBUTOR_FIELDS = [
   { key: "role", label: "Role" },
 ];
 
-const IDENTIFIER_FIELDS = [
-  { key: "kind", label: "Kind" },
-  { key: "value", label: "Value" },
-  { key: "scope", label: "Scope" },
-];
-
-function Field({ label, type = "text", defaultValue }) {
-  return (
-    <label className="flex flex-col gap-1 text-sm text-primary">
-      <span className="font-medium">{label}</span>
-      <input
-        type={type}
-        defaultValue={defaultValue ?? ""}
-        className="rounded border border-border px-2 py-1 text-black"
-      />
-    </label>
-  );
-}
-
 export default function UpdateDocumentPage({}) {
   const { pdf_hash } = useParams();
   const [currentStep, setCurrentStep] = useState(1);
@@ -48,6 +29,17 @@ export default function UpdateDocumentPage({}) {
   const [error, setError] = useState(null);
   const [isBibliographyOpen, setIsBibliographyOpen] = useState(true);
   const [isAuthorsOpen, setIsAuthorsOpen] = useState(true);
+  const [bibliographyFieldsData, setBibliographyFieldsData] = useState({
+    title: null,
+    publication_date: null,
+    publication_year: null,
+    journal: null,
+    journal_abbreviation: null,
+    publisher: null,
+  });
+
+  const bibliography =
+    documentData?.artifact?.grobid_extraction_data?.bibliography;
 
   useEffect(() => {
     if (pdf_hash) {
@@ -58,13 +50,26 @@ export default function UpdateDocumentPage({}) {
           }
           return res.json();
         })
-        .then((res) => setDocumentData(res))
+        .then((res) => {
+          setDocumentData(res);
+
+          const bibliography =
+            res?.artifact?.grobid_extraction_data?.bibliography;
+
+          if (bibliography) {
+            setBibliographyFieldsData({
+              title: bibliography.title,
+              publication_date: bibliography.publication_date,
+              publication_year: bibliography.publication_year,
+              journal: bibliography.journal,
+              journal_abbreviation: bibliography.journal_abbreviation,
+              publisher: bibliography.publisher,
+            });
+          }
+        })
         .catch((err) => setError(err.message));
     }
   }, [pdf_hash]);
-
-  const bibliography =
-    documentData?.artifact?.grobid_extraction_data?.bibliography;
 
   return (
     <div className="flex h-screen w-full py-6">
@@ -89,12 +94,23 @@ export default function UpdateDocumentPage({}) {
               </div>
               {isBibliographyOpen &&
                 BIBLIOGRAPHY_FIELDS.map((field) => (
-                  <Field
-                    key={field.key}
-                    label={field.label}
-                    type={field.type}
-                    defaultValue={bibliography[field.key]}
-                  />
+                  <div key={field.key}>
+                    <label className="flex flex-col gap-1 text-sm text-primary">
+                      <span className="font-medium">{field.label}</span>
+                      <input
+                        type={field.type}
+                        defaultValue={bibliographyFieldsData[field.key] ?? ""}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setBibliographyFieldsData((prev) => ({
+                            ...prev,
+                            [field.key]: value,
+                          }));
+                        }}
+                        className="rounded border border-border px-2 py-1 text-black"
+                      />
+                    </label>
+                  </div>
                 ))}
             </div>
 
