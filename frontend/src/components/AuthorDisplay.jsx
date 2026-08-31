@@ -5,12 +5,15 @@ function getInitials(author) {
   return `${author.forename?.[0] ?? ""}${author.surname?.[0] ?? ""}`.toUpperCase();
 }
 
-export default function AuthorDisplay({ author }) {
+export default function AuthorDisplay({ author, onChange }) {
   const [open, setOpen] = useState(false);
 
   return (
     <div className="border rounded">
-      <div className="w-full flex flex-row items-center border-b p-2">
+      <div
+        className="w-full flex flex-row items-center border-b p-2 hover:cursor-pointer"
+        onClick={() => setOpen(!open)}
+      >
         <div className="flex items-center justify-center w-9 h-9 shrink-0 rounded-full text-white text-sm font-medium bg-primary">
           {getInitials(author)}
         </div>
@@ -39,14 +42,16 @@ export default function AuthorDisplay({ author }) {
             <label className="text-sm text-primary font-medium">Forename</label>
             <input
               className="bg-accent text-black rounded px-2 py-1"
-              defaultValue={author.forename}
+              value={author.forename ?? ""}
+              onChange={(e) => onChange("forename", e.target.value)}
             />
           </div>
           <div className="flex flex-col py-1">
             <label className="text-sm text-primary font-medium">Surname</label>
             <input
               className="bg-accent text-black rounded px-2 py-1"
-              defaultValue={author.surname}
+              value={author.surname ?? ""}
+              onChange={(e) => onChange("surname", e.target.value)}
             />
           </div>
           <div className="flex flex-col py-1">
@@ -55,15 +60,21 @@ export default function AuthorDisplay({ author }) {
             </label>
             <input
               className="bg-accent text-black rounded px-2 py-1"
-              defaultValue={author.affiliation}
+              value={author.affiliation ?? ""}
+              onChange={(e) => onChange("affiliation", e.target.value)}
             />
           </div>
           <div className="flex flex-col py-1">
             <label className="text-sm text-primary font-medium">Role</label>
             <input
               className="bg-accent text-black rounded px-2 py-1"
-              defaultValue={author.role}
+              value={author.role ?? ""}
+              onChange={(e) => onChange("role", e.target.value)}
             />
+          </div>
+          <div className="flex justify-between py-2">
+            <button>Save</button>
+            <button className="bg-red-700!">Delete</button>
           </div>
         </div>
       )}

@@ -14,14 +14,6 @@ const BIBLIOGRAPHY_FIELDS = [
   { key: "publisher", label: "Publisher", type: "text" },
 ];
 
-const CONTRIBUTOR_FIELDS = [
-  { key: "name", label: "Name" },
-  { key: "forename", label: "Forename" },
-  { key: "surname", label: "Surname" },
-  { key: "affiliation", label: "Affiliation" },
-  { key: "role", label: "Role" },
-];
-
 export default function UpdateDocumentPage({}) {
   const { pdf_hash } = useParams();
   const [currentStep, setCurrentStep] = useState(1);
@@ -37,6 +29,15 @@ export default function UpdateDocumentPage({}) {
     journal_abbreviation: null,
     publisher: null,
   });
+  const [contributorsFieldsData, setContributorsFieldsData] = useState([
+    {
+      name: null,
+      forename: null,
+      surname: null,
+      affiliation: null,
+      role: null,
+    },
+  ]);
 
   const bibliography =
     documentData?.artifact?.grobid_extraction_data?.bibliography;
@@ -65,6 +66,16 @@ export default function UpdateDocumentPage({}) {
               journal_abbreviation: bibliography.journal_abbreviation,
               publisher: bibliography.publisher,
             });
+
+            setContributorsFieldsData(
+              (bibliography.authors ?? []).map((author) => ({
+                name: author.name,
+                forename: author.forename,
+                surname: author.surname,
+                affiliation: author.affiliation,
+                role: author.role,
+              })),
+            );
           }
         })
         .catch((err) => setError(err.message));
@@ -72,7 +83,7 @@ export default function UpdateDocumentPage({}) {
   }, [pdf_hash]);
 
   return (
-    <div className="flex h-screen w-full py-6">
+    <div className="flex h-screen w-full py-6 mt-1">
       <div className="w-2/3 h-full overflow-y-auto border-r border-border">
         <PdfViewer file={`/api/pdfs/${pdf_hash}`} />
       </div>
@@ -131,8 +142,18 @@ export default function UpdateDocumentPage({}) {
                   <span className="font-medium text-sm text-primary">
                     Authors
                   </span>
-                  {(bibliography.authors ?? []).map((author, index) => (
-                    <AuthorDisplay key={index} author={author} />
+                  {contributorsFieldsData.map((author, index) => (
+                    <AuthorDisplay
+                      key={index}
+                      author={author}
+                      onChange={(field, value) =>
+                        setContributorsFieldsData((prev) =>
+                          prev.map((a, i) =>
+                            i === index ? { ...a, [field]: value } : a,
+                          ),
+                        )
+                      }
+                    />
                   ))}
                 </>
               )}
