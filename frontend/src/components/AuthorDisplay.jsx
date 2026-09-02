@@ -5,6 +5,14 @@ function getInitials(author) {
   return `${author.forename?.[0] ?? ""}${author.surname?.[0] ?? ""}`.toUpperCase();
 }
 
+function stripAffiliationNumber(affiliation) {
+  // Removes a leading footnote-style number
+  // ^\s*  optional leading whitespace
+  // \d+   one or more digits (the footnote marker)
+  // \s*   optional whitespace after the number
+  return affiliation?.replace(/^\s*\d+\s*/, "") ?? affiliation;
+}
+
 export default function AuthorDisplay({ author, onChange }) {
   const [open, setOpen] = useState(false);
 
@@ -22,7 +30,7 @@ export default function AuthorDisplay({ author, onChange }) {
             {author.forename} {author.surname}
           </p>
           <p className="text-xs text-muted-foreground truncate">
-            {author.affiliation}
+            {stripAffiliationNumber(author.affiliation)}
           </p>
         </div>
         <button
@@ -60,7 +68,7 @@ export default function AuthorDisplay({ author, onChange }) {
             </label>
             <input
               className="bg-accent text-black rounded px-2 py-1"
-              value={author.affiliation ?? ""}
+              value={stripAffiliationNumber(author.affiliation) ?? ""}
               onChange={(e) => onChange("affiliation", e.target.value)}
             />
           </div>
@@ -72,8 +80,7 @@ export default function AuthorDisplay({ author, onChange }) {
               onChange={(e) => onChange("role", e.target.value)}
             />
           </div>
-          <div className="flex justify-between py-2">
-            <button>Save</button>
+          <div className="flex justify-end py-2">
             <button className="bg-red-700!">Delete</button>
           </div>
         </div>
