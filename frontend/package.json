@@ -5,20 +5,20 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "pdfjs-dist": "^6.2.108",
+    "lucide-react": "^1.32.0",
     "react": "latest",
     "react-dom": "latest",
-    "typescript": "latest",
-    "vite": "latest"
+    "react-pdf": "^10.4.1",
+    "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
-    "@types/react": "latest",
-    "@types/react-dom": "latest"
+    "@tailwindcss/vite": "latest",
+    "@vitejs/plugin-react": "latest",
+    "tailwindcss": "latest",
+    "vite": "latest"
   }
 }
