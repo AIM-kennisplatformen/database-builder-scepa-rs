@@ -9,13 +9,21 @@ export default function UploadDocumentPage() {
   const [uploading, setUploading] = useState(false);
   const navigate = useNavigate();
 
+  const allowedFileTypes = [
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ];
+
   const handleInputChange = (e) => {
     const file = e.target.files?.[0];
-    if (file && file.type == "application/pdf") {
+
+    if (!file) return;
+
+    if (allowedFileTypes.includes(file.type)) {
       setFile(file);
       setError("");
     } else {
-      setError("Document must be a PDF");
+      setError("Document must be a PDF or Word document");
     }
   };
 
