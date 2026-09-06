@@ -38,15 +38,16 @@ export default function UploadDocumentPage() {
       .then((res) => {
         if (!res.ok) {
           return res.text().then((text) => {
-            //res doesn't return json so res.json() doesn't work ------------------------------------------
-            throw new Error(`Upload failed (${res.status})`);
+            throw new Error(text || `Upload failed (${res.status})`);
           });
         }
         return res.json();
       })
-      .then(() => {
+      .then((data) => {
+        const pdf_hash = data.result.stored_pdf.pdf_hash;
+
         setFile(null);
-        navigate("/updatelist");
+        navigate(`/update/${pdf_hash}`);
       })
       .catch((err) => {
         setError(err.message);
