@@ -5,14 +5,47 @@ import UpdateDocumentList from "./UpdateDocumentListPage";
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 
+const TEXT_REGEX = "^[A-Za-zÀ-ÖØ-öø-ÿ0-9\\s.,:;'\"!?()&-]+$";
+
 const BIBLIOGRAPHY_FIELDS = [
-  { key: "title", label: "Title", type: "text" },
-  { key: "publication_date", label: "Publication date", type: "text" },
-  { key: "publication_year", label: "Publication year", type: "number" },
-  { key: "journal", label: "Journal", type: "text" },
-  { key: "journal_abbreviation", label: "Journal abbreviation", type: "text" },
-  { key: "publisher", label: "Publisher", type: "text" },
+  { key: "title", label: "Title", type: "text", regex: TEXT_REGEX },
+  {
+    key: "publication_date",
+    label: "Publication date",
+    type: "text",
+    regex: "^\\d{4}(-\\d{2}(-\\d{2})?)?$",
+  },
+  {
+    key: "publication_year",
+    label: "Publication year",
+    type: "text",
+    regex: "^\\d{4}$",
+  },
+  { key: "journal", label: "Journal", type: "text", regex: TEXT_REGEX },
+  {
+    key: "journal_abbreviation",
+    label: "Journal abbreviation",
+    type: "text",
+    regex: "^[A-Za-zÀ-ÖØ-öø-ÿ0-9\\s.&-]+$",
+  },
+  { key: "publisher", label: "Publisher", type: "text", regex: TEXT_REGEX },
 ];
+
+function isValidField(value, regex) {
+  // No regex configured for this field means there's nothing to validate against.
+  if (!regex) return false;
+
+  // Empty values are left to a separate "required" check, not format validation.
+  if (value === "" || value == null) return true;
+
+  try {
+    const pattern = regex instanceof RegExp ? regex : new RegExp(regex);
+    return pattern.test(value);
+  } catch (err) {
+    console.error("Invalid regex pattern:", regex, err);
+    return false;
+  }
+}
 
 export default function UpdateDocumentPage({}) {
   const { pdf_hash } = useParams();
@@ -29,6 +62,7 @@ export default function UpdateDocumentPage({}) {
     journal_abbreviation: null,
     publisher: null,
   });
+  const [bibliographyFieldErrors, setBibliographyFieldErrors] = useState({});
   const [contributorsFieldsData, setContributorsFieldsData] = useState([
     {
       name: null,
@@ -82,6 +116,8 @@ export default function UpdateDocumentPage({}) {
     }
   }, [pdf_hash]);
 
+  console.log(bibliographyFieldsData);
+
   return (
     <div className="flex h-screen w-full py-6 mt-1">
       <div className="w-2/3 h-full overflow-y-auto border-r border-border">
@@ -117,9 +153,23 @@ export default function UpdateDocumentPage({}) {
                             ...prev,
                             [field.key]: value,
                           }));
+                          setBibliographyFieldErrors((prev) => ({
+                            ...prev,
+                            [field.key]: !isValidField(value, field.regex),
+                          }));
                         }}
-                        className="rounded border border-border px-2 py-1 text-black"
+                        aria-invalid={bibliographyFieldErrors[field.key] || undefined}
+                        className={`rounded border px-2 py-1 text-black ${
+                          bibliographyFieldErrors[field.key]
+                            ? "border-red-500"
+                            : "border-border"
+                        }`}
                       />
+                      {bibliographyFieldErrors[field.key] && (
+                        <span className="text-xs text-red-500">
+                          Invalid format for {field.label.toLowerCase()}.
+                        </span>
+                      )}
                     </label>
                   </div>
                 ))}
