@@ -8,27 +8,48 @@ import { useParams } from "react-router-dom";
 const TEXT_REGEX = "^[A-Za-zÀ-ÖØ-öø-ÿ0-9\\s.,:;'\"!?()&-]+$";
 
 const BIBLIOGRAPHY_FIELDS = [
-  { key: "title", label: "Title", type: "text", regex: TEXT_REGEX },
+  {
+    key: "title",
+    label: "Title",
+    type: "text",
+    regex: TEXT_REGEX,
+    placeholder: "Energy poverty solotions",
+  },
   {
     key: "publication_date",
     label: "Publication date",
     type: "text",
-    regex: "^\\d{4}(-\\d{2}(-\\d{2})?)?$",
+    regex: "^(\\d{4}-)?\\d{2}-\\d{2}$",
+    placeholder: "yyyy-mm-dd or mm-dd",
   },
   {
     key: "publication_year",
     label: "Publication year",
     type: "text",
     regex: "^\\d{4}$",
+    placeholder: " 2026",
   },
-  { key: "journal", label: "Journal", type: "text", regex: TEXT_REGEX },
+  {
+    key: "journal",
+    label: "Journal",
+    type: "text",
+    regex: TEXT_REGEX,
+    placeholder: "Journal",
+  },
   {
     key: "journal_abbreviation",
     label: "Journal abbreviation",
     type: "text",
     regex: "^[A-Za-zÀ-ÖØ-öø-ÿ0-9\\s.&-]+$",
+    placeholder: "Journal abbreviation",
   },
-  { key: "publisher", label: "Publisher", type: "text", regex: TEXT_REGEX },
+  {
+    key: "publisher",
+    label: "Publisher",
+    type: "text",
+    regex: TEXT_REGEX,
+    placeholder: "Publisher",
+  },
 ];
 
 function isValidField(value, regex) {
@@ -53,7 +74,7 @@ export default function UpdateDocumentPage({}) {
   const [documentData, setDocumentData] = useState(null);
   const [error, setError] = useState(null);
   const [isBibliographyOpen, setIsBibliographyOpen] = useState(true);
-  const [isAuthorsOpen, setIsAuthorsOpen] = useState(true);
+  const [isAuthorsOpen, setIsAuthorsOpen] = useState(false);
   const [bibliographyFieldsData, setBibliographyFieldsData] = useState({
     title: null,
     publication_date: null,
@@ -158,12 +179,15 @@ export default function UpdateDocumentPage({}) {
                             [field.key]: !isValidField(value, field.regex),
                           }));
                         }}
-                        aria-invalid={bibliographyFieldErrors[field.key] || undefined}
+                        aria-invalid={
+                          bibliographyFieldErrors[field.key] || undefined
+                        }
                         className={`rounded border px-2 py-1 text-black ${
                           bibliographyFieldErrors[field.key]
                             ? "border-red-500"
                             : "border-border"
                         }`}
+                        placeholder={field.placeholder}
                       />
                       {bibliographyFieldErrors[field.key] && (
                         <span className="text-xs text-red-500">
