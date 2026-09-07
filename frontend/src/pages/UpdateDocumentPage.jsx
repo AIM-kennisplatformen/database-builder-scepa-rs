@@ -234,6 +234,9 @@ export default function UpdateDocumentPage({}) {
             </div>
           </div>
         )}
+        <button className="w-full rounded bg-primary py-2 text-white my-4">
+          Save document
+        </button>
       </div>
     </div>
   );
