@@ -13,7 +13,7 @@ export default function UpdateDocumentList({}) {
     fetch("/api/documents")
       .then((res) => {
         if (!res.ok) {
-          throw new Error(`Failed to load documents (${res.status})`);
+          throw new Error(`Failed to load documents`);
         }
         return res.json();
       })
