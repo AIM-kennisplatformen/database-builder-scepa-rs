@@ -4,8 +4,7 @@ import PdfViewer from "../components/PdfViewer";
 import UpdateDocumentList from "./UpdateDocumentListPage";
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
-
-const TEXT_REGEX = "^[A-Za-zÀ-ÖØ-öø-ÿ0-9\\s.,:;'\"!?()&-]+$";
+import { TEXT_REGEX, isValidField } from "../utils/validation";
 
 const BIBLIOGRAPHY_FIELDS = [
   {
@@ -51,22 +50,6 @@ const BIBLIOGRAPHY_FIELDS = [
     placeholder: "Publisher",
   },
 ];
-
-function isValidField(value, regex) {
-  // No regex configured for this field means there's nothing to validate against.
-  if (!regex) return false;
-
-  // Empty values are left to a separate "required" check, not format validation.
-  if (value === "" || value == null) return true;
-
-  try {
-    const pattern = regex instanceof RegExp ? regex : new RegExp(regex);
-    return pattern.test(value);
-  } catch (err) {
-    console.error("Invalid regex pattern:", regex, err);
-    return false;
-  }
-}
 
 export default function UpdateDocumentPage({}) {
   const { pdf_hash } = useParams();

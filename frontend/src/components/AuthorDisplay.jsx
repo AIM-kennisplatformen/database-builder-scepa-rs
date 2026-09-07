@@ -1,5 +1,13 @@
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";
+import { TEXT_REGEX, isValidField } from "../utils/validation";
+
+const AUTHOR_FIELDS = [
+  { key: "forename", label: "Forename", regex: TEXT_REGEX },
+  { key: "surname", label: "Surname", regex: TEXT_REGEX },
+  { key: "affiliation", label: "Affiliation", regex: TEXT_REGEX },
+  { key: "role", label: "Role", regex: TEXT_REGEX },
+];
 
 function getInitials(author) {
   return `${author.forename?.[0] ?? ""}${author.surname?.[0] ?? ""}`.toUpperCase();
@@ -15,6 +23,15 @@ function stripAffiliationNumber(affiliation) {
 
 export default function AuthorDisplay({ author, onChange }) {
   const [open, setOpen] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({});
+
+  function handleChange(field, regex, value) {
+    onChange(field, value);
+    setFieldErrors((prev) => ({
+      ...prev,
+      [field]: !isValidField(value, regex),
+    }));
+  }
 
   return (
     <div className="border rounded">
@@ -46,40 +63,35 @@ export default function AuthorDisplay({ author, onChange }) {
       </div>
       {open && (
         <div className="p-2">
-          <div className="flex flex-col py-1">
-            <label className="text-sm text-primary font-medium">Forename</label>
-            <input
-              className="bg-accent text-black rounded px-2 py-1"
-              value={author.forename ?? ""}
-              onChange={(e) => onChange("forename", e.target.value)}
-            />
-          </div>
-          <div className="flex flex-col py-1">
-            <label className="text-sm text-primary font-medium">Surname</label>
-            <input
-              className="bg-accent text-black rounded px-2 py-1"
-              value={author.surname ?? ""}
-              onChange={(e) => onChange("surname", e.target.value)}
-            />
-          </div>
-          <div className="flex flex-col py-1">
-            <label className="text-sm text-primary font-medium">
-              Affiliation
-            </label>
-            <input
-              className="bg-accent text-black rounded px-2 py-1"
-              value={stripAffiliationNumber(author.affiliation) ?? ""}
-              onChange={(e) => onChange("affiliation", e.target.value)}
-            />
-          </div>
-          <div className="flex flex-col py-1">
-            <label className="text-sm text-primary font-medium">Role</label>
-            <input
-              className="bg-accent text-black rounded px-2 py-1"
-              value={author.role ?? ""}
-              onChange={(e) => onChange("role", e.target.value)}
-            />
-          </div>
+          {AUTHOR_FIELDS.map((field) => {
+            const value =
+              field.key === "affiliation"
+                ? (stripAffiliationNumber(author.affiliation) ?? "")
+                : (author[field.key] ?? "");
+
+            return (
+              <div className="flex flex-col py-1" key={field.key}>
+                <label className="text-sm text-primary font-medium">
+                  {field.label}
+                </label>
+                <input
+                  className={`bg-accent text-black rounded px-2 py-1 border ${
+                    fieldErrors[field.key] ? "border-red-500" : "border-border"
+                  }`}
+                  value={value}
+                  onChange={(e) =>
+                    handleChange(field.key, field.regex, e.target.value)
+                  }
+                  aria-invalid={fieldErrors[field.key] || undefined}
+                />
+                {fieldErrors[field.key] && (
+                  <span className="text-xs text-red-500">
+                    Invalid format for {field.label.toLowerCase()}.
+                  </span>
+                )}
+              </div>
+            );
+          })}
           <div className="flex justify-end py-2">
             <button className="bg-red-700!">Delete</button>
           </div>
