@@ -5,6 +5,7 @@ import UpdateDocumentList from "./UpdateDocumentListPage";
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { TEXT_REGEX, isValidField } from "../utils/validation";
+import { Plus } from "lucide-react";
 
 const BIBLIOGRAPHY_FIELDS = [
   {
@@ -106,7 +107,7 @@ export default function UpdateDocumentPage({}) {
             });
 
             setContributorsFieldsData(
-              (bibliography.authors ?? []).map((author) => ({
+              (bibliography.authors ?? []).map((author, key) => ({
                 name: author.name,
                 forename: author.forename,
                 surname: author.surname,
@@ -120,7 +121,9 @@ export default function UpdateDocumentPage({}) {
     }
   }, [pdf_hash]);
 
-  console.log(bibliographyFieldsData);
+  function onAuthorDeleteHandler(authorId) {}
+
+  console.log(contributorsFieldsData);
 
   return (
     <div className="flex h-screen w-full py-6 mt-1">
@@ -210,8 +213,26 @@ export default function UpdateDocumentPage({}) {
                           ),
                         )
                       }
+                      onDelete={onAuthorDeleteHandler}
                     />
                   ))}
+                  <button
+                    className="flex items-center justify-center border-2! border-primary! bg-muted!"
+                    onClick={() => {
+                      setContributorsFieldsData((prev) => [
+                        ...prev,
+                        {
+                          name: null,
+                          forename: null,
+                          surname: null,
+                          affiliation: null,
+                          role: null,
+                        },
+                      ]);
+                    }}
+                  >
+                    <Plus className="text-primary text-center" />
+                  </button>
                 </>
               )}
             </div>

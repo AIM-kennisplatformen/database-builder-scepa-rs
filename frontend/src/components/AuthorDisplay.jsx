@@ -21,7 +21,7 @@ function stripAffiliationNumber(affiliation) {
   return affiliation?.replace(/^\s*\d+\s*/, "") ?? affiliation;
 }
 
-export default function AuthorDisplay({ author, onChange }) {
+export default function AuthorDisplay({ author, onChange, onDelete }) {
   const [open, setOpen] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
 
@@ -93,7 +93,9 @@ export default function AuthorDisplay({ author, onChange }) {
             );
           })}
           <div className="flex justify-end py-2">
-            <button className="bg-red-700!">Delete</button>
+            <button className="bg-red-700!" onClick={onDelete}>
+              Delete
+            </button>
           </div>
         </div>
       )}
