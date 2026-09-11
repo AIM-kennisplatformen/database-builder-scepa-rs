@@ -2935,6 +2935,8 @@ name = "scepa-api"
 version = "0.1.0"
 dependencies = [
  "axum 0.8.9",
+ "clap",
+ "dotenvy",
  "reqwest",
  "restate-sdk",
  "scepa",

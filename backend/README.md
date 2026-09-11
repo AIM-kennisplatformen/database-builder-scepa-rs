@@ -17,6 +17,22 @@ cargo run --package scepa-api
 cargo run --package scepa-cli -- --help
 ```
 
+The API searches for a `.env` file before reading its configuration. To load a
+specific file instead, pass `--env-file <PATH>`:
+
+```bash
+cargo run --package scepa-api -- --env-file ../.env
+```
+
+Missing dotenv files are ignored so deployments can provide configuration
+through process environment variables. Existing process variables take
+precedence over values from the dotenv file.
+
+Every API environment setting is also available as a command-line option. Run
+`cargo run --package scepa-api -- --help` for the complete configuration and
+its environment variable names. Command-line values take precedence over the
+environment and dotenv defaults.
+
 The API reads `RESTATE_INGRESS_URL` (default `http://localhost:8080`) and
 invokes `NewDocumentWorkflow` after storing each upload in Garage. Successful
 publication writes canonical metadata to TypeDB and source-plus-combined passage
