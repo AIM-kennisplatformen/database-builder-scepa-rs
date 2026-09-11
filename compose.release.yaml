@@ -16,3 +16,11 @@ services:
     ports: !override
       - "${FRONTEND_PORT:-5173}:80"
     volumes: !reset []
+
+  mcp:
+    build:
+      target: release
+    environment:
+      RUST_LOG: ${RUST_LOG:-scepa_mcp=info}
+    volumes: !override
+      - mcp_model_cache:/models/huggingface

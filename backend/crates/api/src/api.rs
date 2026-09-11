@@ -342,6 +342,7 @@ async fn get_draft(
     responses(
         (status = 200, description = "Published document", body = PublishResponse),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
+        (status = 413, description = "Request body exceeds the upload limit", body = ErrorResponse),
         (status = 415, description = "Unsupported media type", body = ErrorResponse),
         (status = 422, description = "Invalid request data", body = ErrorResponse),
         (status = 502, description = "Workflow error", body = ErrorResponse)
@@ -446,6 +447,7 @@ async fn get_document_requiring_fixing(
     responses(
         (status = 200, description = "Repaired and published document", body = PublishResponse),
         (status = 400, description = "Invalid request", body = ErrorResponse),
+        (status = 413, description = "Request body exceeds the upload limit", body = ErrorResponse),
         (status = 415, description = "Unsupported media type", body = ErrorResponse),
         (status = 422, description = "Invalid request data", body = ErrorResponse),
         (status = 502, description = "Workflow error", body = ErrorResponse)
@@ -508,6 +510,7 @@ async fn get_published_document(
     responses(
         (status = 200, description = "Updated document", body = UpdateDocumentWorkflowResponse),
         (status = 400, description = "Invalid request body", body = ErrorResponse),
+        (status = 413, description = "Request body exceeds the upload limit", body = ErrorResponse),
         (status = 415, description = "Unsupported media type", body = ErrorResponse),
         (status = 422, description = "Invalid request data", body = ErrorResponse),
         (status = 502, description = "Workflow error", body = ErrorResponse)
@@ -787,6 +790,21 @@ mod tests {
                 .is_some(),
             "the API error schema must expose a human-readable error message"
         );
+
+        for (path, method) in [
+            ("/pdfs", "post"),
+            ("/pdfs/submissions/{workflow_id}", "post"),
+            ("/drafts/{pdf_hash}", "put"),
+            ("/documents/requiring-fixing/{case_id}", "put"),
+            ("/documents/{pdf_hash}", "put"),
+        ] {
+            assert!(
+                document["paths"][path][method]["responses"]
+                    .get("413")
+                    .is_some(),
+                "body-accepting operation {method} {path} must document its size-limit response"
+            );
+        }
 
         for path in document["paths"].as_object().unwrap().values() {
             for operation in path.as_object().unwrap().values() {

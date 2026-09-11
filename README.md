@@ -1,6 +1,6 @@
 # SCEPA
 
-SCEPA contains the PDF extraction, TEI conversion, storage, API, and CLI
+SCEPA contains the PDF extraction, TEI conversion, storage, vector publication, API, and CLI
 building blocks for a document pipeline. Uploads are stored in Garage before
 the durable `NewDocumentWorkflow` is invoked with the PDF's content hash.
 
@@ -11,6 +11,7 @@ backend/                 Rust workspace
   crates/api/            Axum API
   crates/cli/            Clap command-line client
   crates/core/           Shared pipeline, models, and persistence
+mcp/                     Standalone literature retrieval MCP project
 frontend/                React operator UI
 compose.yaml             Default development stack with hot reloading
 compose.development.yaml Development tools extension
@@ -69,6 +70,8 @@ The stack exposes:
 - TypeDB gRPC: `localhost:1729`
 - TypeDB HTTP: `http://localhost:8000`
 - TypeDB MCP with `tools`: `http://localhost:8001`
+- SCEPA literature MCP: `http://localhost:8002/mcp`
+- Qdrant HTTP/gRPC: `localhost:6333` / `localhost:6334`
 - SonarQube with `tools`: `http://localhost:9000`
 
 ## API
@@ -79,9 +82,33 @@ client generation, validation, or documentation tooling, or browse the
 interactive Swagger UI at `http://localhost:3000/swagger-ui/`.
 
 `POST /pdfs` submits a PDF to `NewDocumentWorkflow`, using its SHA-256 hash as
-the workflow identifier, and waits for extraction, TypeDB export, and valid
-artifact persistence. The returned artifact then opens in the shared update
-flow for optional manual corrections.
+the workflow identifier, and waits for extraction, TypeDB export, embedding and
+Qdrant publication, and valid artifact persistence. The returned artifact then
+opens in the shared update flow for optional manual corrections.
+
+Every non-empty effective abstract and body passage is embedded through the
+OpenAI-compatible endpoint configured by `OPENAI_HOST`, `OPENAI_API_KEY`, and
+`OPENAI_EMBEDDING_MODEL`. The same publication also creates combined vectors from
+complete adjacent passages, targeting 500 estimated tokens, stopping at 800,
+and reusing up to 100 tokens of complete trailing passages around the 80-token
+overlap target. Section and heading changes are hard boundaries. An individual
+source passage over 800 tokens remains whole so its PDF coordinates are never
+assigned to text outside that passage.
+
+Source and combined embedding inputs are prefixed with the available document
+title, section, and heading. Source Qdrant payloads contain `id`, `pdf_hash`,
+unprefixed `text`, `combined_point_ids`, `is_abstract`, `is_combined: false`,
+`bounding_boxes`, and optional `section` and `heading`. Combined payloads contain
+the same identity, text, marker, and optional context fields, with
+`is_combined: true` and `source_point_ids` instead of bounding boxes. Both
+reference arrays contain Qdrant point UUIDs. Qdrant creates boolean payload
+indexes for `is_abstract` and `is_combined` and a keyword index for `pdf_hash`.
+
+Updating a document refreshes its complete source-and-combined vector set. This
+payload contract is a breaking change: recreate the Qdrant collection and
+republish documents when deploying it; there is no historical backfill. Set
+`EMBEDDING_MAX_CONCURRENCY` (default `4`) to cap embedding HTTP calls across all
+workflows in one API process.
 
 ```bash
 curl --request POST \
@@ -122,3 +149,21 @@ scepa-cli single --identifier 2AEJBJL6-debug .sources/pdfs/2AEJBJL6.pdf
 
 The `scepa-api` binary only runs the HTTP endpoint; command-line operations live
 in the separate `scepa-cli` crate.
+
+## Literature MCP
+
+The self-contained project under `mcp/` exposes authenticated Streamable HTTP at
+`/mcp`. `search_literature` first obtains eligible PDF hashes from TypeDB using
+publication-date, document-type, and organization filters, similarity-searches
+`4 × top_k` source passages in Qdrant, resolves their linked combined passages,
+and reranks them locally. Search responses always include bibliographic metadata
+and deterministic IEEE references keyed by each result's `pdf_hash`. Hashes are
+opaque association keys, not user-facing citations.
+
+Set `MCP_BEARER_TOKEN` before starting the service. The unquantized
+`cross-encoder/ms-marco-MiniLM-L6-v2` ONNX model is downloaded on first startup
+and retained in the `mcp_model_cache` volume. The model ID, revision, batch size,
+and other service settings are configurable through the variables in
+`.env.example`. The search tool's optional `top_k` parameter defaults to 30 and
+accepts values from 1 through 50. See `mcp/README.md` for standalone setup and
+deployment instructions.

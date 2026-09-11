@@ -27,10 +27,13 @@
 //! error rather than the original pipeline error.
 
 pub mod document;
+pub mod embedding;
 pub mod garage;
 pub mod grobid;
+pub mod qdrant;
 pub mod tei;
 pub mod typedb;
+pub mod vector;
 
 pub use document::{DocumentPipelineOutput, DocumentPipelineService, DocumentPipelineWarning};
 
