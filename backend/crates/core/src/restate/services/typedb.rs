@@ -55,7 +55,7 @@ impl TypeDbRestateService {
         self.review_store
             .stage(FailureRecord {
                 workflow_id,
-                service: TypeDbService::<TypeDbStore>::NAME.into(),
+                service: TypeDbService::<TypeDbStore>::NAME,
                 phase: PipelinePhase::InputValidation,
                 disposition: FailureDisposition::Terminal,
                 error_message: message,

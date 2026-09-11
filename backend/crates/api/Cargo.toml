@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 axum = "0.8.4"
+clap = { version = "4.5.46", features = ["derive", "env"] }
+dotenvy = "0.15.7"
 reqwest = { version = "0.13.4", features = ["json"] }
 restate-sdk = "0.11.0"
 scepa = { path = "../core" }

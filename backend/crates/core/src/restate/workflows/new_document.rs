@@ -8,6 +8,7 @@ use crate::{
         services::{
             ArtifactRestateServiceClient, GarageRestateServiceClient, LinkWorkflowPdfRequest,
             StoreArtifactRequest, TypeDbExecuteRequest, TypeDbRestateServiceClient,
+            VectorExecuteRequest, VectorRestateServiceClient,
         },
         workflows::{DocumentExtractionWorkflowClient, DocumentExtractionWorkflowRequest},
     },
@@ -63,16 +64,24 @@ impl NewDocumentWorkflow {
             .await?
             .into_inner();
         let draft = DraftDocument::new(extracted.output);
+        let effective_document = draft.effective_document();
         let canonical = ctx
             .service_client::<TypeDbRestateServiceClient>()
             .execute(Json(TypeDbExecuteRequest {
                 workflow_id,
                 pdf_hash: stored.pdf_hash.clone(),
-                document: draft.effective_document(),
+                document: effective_document.clone(),
             }))
             .call()
             .await?
             .into_inner();
+        ctx.service_client::<VectorRestateServiceClient>()
+            .execute(Json(VectorExecuteRequest {
+                pdf_hash: stored.pdf_hash.clone(),
+                document: effective_document,
+            }))
+            .call()
+            .await?;
         ctx.service_client::<ArtifactRestateServiceClient>()
             .store_published(Json(StoreArtifactRequest {
                 pdf_hash: stored.pdf_hash.clone(),
