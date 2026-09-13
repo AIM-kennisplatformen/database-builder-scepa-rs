@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::draft::{
     bibliography::{Bibliography, Contributor, Identifier},
-    citation::Citation,
     figure::FigureOrTable,
     passage::Passage,
 };
@@ -22,7 +21,6 @@ pub struct TeiDocument {
     pub bibliography: Bibliography,
     pub body_text: Vec<Passage>,
     pub figures_and_tables: Vec<FigureOrTable>,
-    pub references: Vec<Citation>,
 }
 
 /// An extraction draft together with sparse, operator-authored overrides.
@@ -138,7 +136,6 @@ mod tests {
             },
             body_text: vec![],
             figures_and_tables: vec![],
-            references: vec![],
         }
     }
 
@@ -151,6 +148,31 @@ mod tests {
             serde_json::json!({ "bibliography": {} })
         );
         assert!(value.get("extracted_data").is_none());
+    }
+
+    #[test]
+    fn legacy_citation_fields_are_ignored() {
+        let mut value = serde_json::to_value(extracted()).unwrap();
+        value["references"] = serde_json::json!([{ "title": "Prior work" }]);
+        value["body_text"] = serde_json::json!([{
+            "type": "text",
+            "id": "p1",
+            "text": "Body text",
+            "coordinates": [],
+            "references": [{
+                "target": "#b1",
+                "text": "[1]",
+                "byte_start": 5,
+                "byte_end": 8
+            }],
+            "heading_context": null,
+            "section": null
+        }]);
+
+        let document: TeiDocument = serde_json::from_value(value).unwrap();
+        let serialized = serde_json::to_value(document).unwrap();
+        assert!(serialized.get("references").is_none());
+        assert!(serialized["body_text"][0].get("references").is_none());
     }
 
     #[test]

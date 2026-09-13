@@ -82,7 +82,6 @@ mod tests {
             bibliography: Bibliography::default(),
             body_text: vec![],
             figures_and_tables: vec![],
-            references: vec![],
         };
         let request = VectorUpdateRequest {
             pdf_hash: "a".repeat(64),

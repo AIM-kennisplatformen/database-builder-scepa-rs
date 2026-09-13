@@ -555,7 +555,6 @@ mod tests {
             id: id.into(),
             text: value.into(),
             coordinates: vec![],
-            references: vec![],
             heading_context: None,
             section: None,
         }
@@ -570,7 +569,6 @@ mod tests {
             },
             body_text: body,
             figures_and_tables: vec![],
-            references: vec![],
         }
     }
 

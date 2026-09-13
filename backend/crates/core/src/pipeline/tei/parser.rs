@@ -1,7 +1,6 @@
 //! TEI XML parsing and typed extraction.
 
 mod body;
-mod citation;
 mod common;
 mod media;
 mod metadata;
@@ -46,20 +45,11 @@ pub(super) fn convert_tei(tei: &str) -> eros::Result<TeiDocument> {
         figures_and_tables = media::parse_figures(text, &mut counters);
     }
 
-    let references = root
-        .descendants_named("listBibl")
-        .into_iter()
-        .flat_map(|list| list.descendants_named("biblStruct"))
-        .enumerate()
-        .filter_map(|(index, entry)| citation::parse_citation(entry, index + 1))
-        .collect();
-
     Ok(TeiDocument {
         level,
         bibliography,
         body_text,
         figures_and_tables,
-        references,
     })
 }
 
@@ -112,12 +102,8 @@ mod tests {
         let Passage::Text(passage) = &document.body_text[0] else {
             panic!()
         };
-        assert_eq!(passage.text, "See [1] for details.");
+        assert_eq!(passage.text, "See for details.");
         assert_eq!(passage.section.as_deref(), Some("Introduction"));
-        assert_eq!(
-            &passage.text[passage.references[0].byte_start..passage.references[0].byte_end],
-            "[1]"
-        );
         assert_eq!(passage.coordinates[0].page, Some(1));
 
         assert_eq!(document.figures_and_tables.len(), 2);
@@ -125,24 +111,18 @@ mod tests {
             panic!()
         };
         assert_eq!(table.content.as_ref().unwrap().rows, vec![vec!["A", "B"]]);
-
-        assert_eq!(document.references.len(), 1);
-        assert_eq!(document.references[0].title.as_deref(), Some("Prior work"));
-        assert_eq!(document.references[0].publication.year, Some(2020));
-        assert_eq!(document.references[0].contributors[0].name, "Grace Hopper");
     }
 
     #[test]
-    fn selects_sentence_level_and_preserves_unicode_offsets() {
-        let xml = r##"<TEI><teiHeader/><text><body><div><p><s>α <ref type="bibr" target="#b1">[é]</ref>.</s><s>Two.</s></p></div></body></text></TEI>"##;
+    fn removes_citation_markers_and_preserves_other_reference_text() {
+        let xml = r##"<TEI><teiHeader/><text><body><div><p><s>α <ref type="bibr" target="#b1">[é]</ref><ref type="bibr">[2]</ref><ref type="bibr"/> <ref type="url">source</ref>.</s><s>Two.</s></p></div></body></text></TEI>"##;
         let document = convert_tei(xml).unwrap();
         assert_eq!(document.level, PassageLevel::Sentence);
         assert_eq!(document.body_text.len(), 2);
         let Passage::Text(first) = &document.body_text[0] else {
             panic!()
         };
-        let reference = &first.references[0];
-        assert_eq!(&first.text[reference.byte_start..reference.byte_end], "[é]");
+        assert_eq!(first.text, "α source.");
     }
 
     #[test]
@@ -157,6 +137,8 @@ mod tests {
         let json = serde_json::to_value(document).unwrap();
         assert_eq!(json["level"], "paragraph");
         assert_eq!(json["body_text"][0]["type"], "text");
+        assert!(json.get("references").is_none());
+        assert!(json["body_text"][0].get("references").is_none());
         assert_eq!(json["figures_and_tables"][1]["type"], "table");
     }
 }

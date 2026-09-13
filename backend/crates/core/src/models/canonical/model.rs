@@ -393,7 +393,6 @@ mod tests {
             },
             body_text: vec![],
             figures_and_tables: vec![],
-            references: vec![],
         }
     }
 

@@ -19,7 +19,7 @@ pub struct Bibliography {
     pub abstract_text: Vec<TextPassage>,
 }
 
-/// A person credited by a document or citation.
+/// A person credited by a document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 #[builder(on(String, into))]
 pub struct Contributor {
@@ -65,5 +65,4 @@ pub enum IdentifierScope {
     Document,
     Analytic,
     Monograph,
-    Citation,
 }

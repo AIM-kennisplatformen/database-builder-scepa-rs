@@ -201,7 +201,6 @@ impl PostgresReviewStore {
             bibliography: Bibliography::default(),
             body_text: Vec::new(),
             figures_and_tables: Vec::new(),
-            references: Vec::new(),
         }))
     }
 
