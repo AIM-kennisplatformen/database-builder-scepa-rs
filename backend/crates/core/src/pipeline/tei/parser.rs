@@ -46,6 +46,7 @@ pub(super) fn convert_tei(tei: &str) -> eros::Result<TeiDocument> {
     }
 
     Ok(TeiDocument {
+        id: String::new(),
         level,
         bibliography,
         body_text,

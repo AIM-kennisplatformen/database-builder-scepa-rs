@@ -184,7 +184,11 @@ impl PostgresReviewStore {
                 .flatten();
 
         artifact
-            .map(serde_json::from_value)
+            .map(|value| {
+                let mut draft: DraftDocument = serde_json::from_value(value)?;
+                draft.assign_extracted_ids(pdf_hash);
+                Ok::<_, serde_json::Error>(draft)
+            })
             .transpose()
             .map_err(Into::into)
     }
@@ -196,12 +200,15 @@ impl PostgresReviewStore {
             return Ok(draft);
         }
 
-        Ok(DraftDocument::new(TeiDocument {
+        let mut draft = DraftDocument::new(TeiDocument {
+            id: String::new(),
             level: PassageLevel::Paragraph,
             bibliography: Bibliography::default(),
             body_text: Vec::new(),
             figures_and_tables: Vec::new(),
-        }))
+        });
+        draft.assign_extracted_ids(pdf_hash);
+        Ok(draft)
     }
 
     /// Replaces only the operator-authored layer of an existing draft.
@@ -272,9 +279,11 @@ impl PostgresReviewStore {
         .await?;
 
         row.map(|(artifact, published_at)| {
+            let mut artifact: DraftDocument = serde_json::from_value(artifact)?;
+            artifact.assign_extracted_ids(pdf_hash);
             Ok(PublishedDocument {
                 pdf_hash: pdf_hash.to_owned(),
-                artifact: serde_json::from_value(artifact)?,
+                artifact,
                 published_at,
             })
         })

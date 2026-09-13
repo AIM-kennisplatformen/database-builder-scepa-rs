@@ -1,6 +1,7 @@
 pub mod bibliography;
 pub mod document;
 pub mod figure;
+mod identity;
 pub mod passage;
 
 pub use bibliography::*;

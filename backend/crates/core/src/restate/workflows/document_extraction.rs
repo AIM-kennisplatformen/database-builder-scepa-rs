@@ -57,7 +57,9 @@ impl DocumentExtractionWorkflow {
             .call()
             .await?
             .into_inner();
-        let draft = DraftDocument::new(converted.output.clone());
+        let mut output = converted.output;
+        output.assign_extracted_ids(&request.pdf_hash);
+        let draft = DraftDocument::new(output.clone());
         ctx.service_client::<ArtifactRestateServiceClient>()
             .store_draft(Json(StoreArtifactRequest {
                 pdf_hash: request.pdf_hash,
@@ -67,7 +69,7 @@ impl DocumentExtractionWorkflow {
             .await?;
 
         Ok(Json(PipelineExecuteResponse {
-            output: converted.output,
+            output,
             warnings: grobid
                 .warnings
                 .into_iter()

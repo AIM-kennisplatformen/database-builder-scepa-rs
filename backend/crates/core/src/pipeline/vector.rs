@@ -562,6 +562,7 @@ mod tests {
 
     fn document(abstracts: Vec<TextPassage>, body: Vec<Passage>) -> TeiDocument {
         TeiDocument {
+            id: String::new(),
             level: PassageLevel::Paragraph,
             bibliography: Bibliography {
                 abstract_text: abstracts,
