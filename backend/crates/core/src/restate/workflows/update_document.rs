@@ -10,7 +10,8 @@ use crate::{
     restate::services::{
         ArtifactRestateServiceClient, GarageRestateServiceClient, LinkWorkflowPdfRequest,
         ResolveReviewCaseRequest, StoreArtifactRequest, TypeDbExecuteRequest,
-        TypeDbRestateServiceClient, TypeDbUpdateRequest,
+        TypeDbRestateServiceClient, TypeDbUpdateRequest, VectorExecuteRequest,
+        VectorRestateServiceClient, VectorUpdateRequest,
     },
 };
 
@@ -79,18 +80,28 @@ impl UpdateDocumentWorkflow {
             .call()
             .await?;
 
+        let new_document = new_artifact.effective_document();
         let (canonical, changes) = if let Some(old_artifact) = old_artifact {
+            let old_document = old_artifact.effective_document();
             let updated = ctx
                 .service_client::<TypeDbRestateServiceClient>()
                 .update(Json(TypeDbUpdateRequest {
                     workflow_id: ctx.key().to_owned(),
                     pdf_hash: request.pdf_hash.clone(),
-                    old_document: old_artifact.effective_document(),
-                    new_document: new_artifact.effective_document(),
+                    old_document: old_document.clone(),
+                    new_document: new_document.clone(),
                 }))
                 .call()
                 .await?
                 .into_inner();
+            ctx.service_client::<VectorRestateServiceClient>()
+                .update(Json(VectorUpdateRequest {
+                    pdf_hash: request.pdf_hash.clone(),
+                    old_document,
+                    new_document: new_document.clone(),
+                }))
+                .call()
+                .await?;
             (updated.canonical, updated.changes)
         } else {
             let canonical = ctx
@@ -102,11 +113,18 @@ impl UpdateDocumentWorkflow {
                         .map(|review| review.workflow_id.clone())
                         .unwrap_or_else(|| ctx.key().to_owned()),
                     pdf_hash: request.pdf_hash.clone(),
-                    document: new_artifact.effective_document(),
+                    document: new_document.clone(),
                 }))
                 .call()
                 .await?
                 .into_inner();
+            ctx.service_client::<VectorRestateServiceClient>()
+                .execute(Json(VectorExecuteRequest {
+                    pdf_hash: request.pdf_hash.clone(),
+                    document: new_document.clone(),
+                }))
+                .call()
+                .await?;
             let changes = CanonicalUpdateSummary {
                 document_changed: true,
                 contributors_inserted: canonical.persons.len(),

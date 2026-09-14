@@ -75,6 +75,8 @@ box "Restate Services" #FFF3D6
 
   control "TypeDB Pipeline" as typedb_service
 
+  control "Vector Pipeline" as vector_service
+
 end box
 
 
@@ -88,6 +90,10 @@ box "External Containers" #EDEDED
   database "PostgreSQL" as postgres
 
   database "TypeDB" as typedb
+
+  database "Qdrant" as qdrant
+
+  participant "Embedding API" as embeddings
 
 end box
 
@@ -409,6 +415,16 @@ else Revised draft is stored
    else Canonical publication succeeds
 
      typedb --> typedb_service : Success
+
+     update_workflow -> vector_service : Refresh effective source and combined passages
+
+     vector_service -> embeddings : Embed contextual source and combined text
+
+     embeddings --> vector_service : Embedding vectors
+
+     vector_service -> qdrant : Delete stale points and upsert new vectors
+
+     qdrant --> vector_service : Awaited update completed
 
      note over typedb_service, postgres_service
        This block shows post-publication finalization.
