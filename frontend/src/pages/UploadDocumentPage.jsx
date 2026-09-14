@@ -36,14 +36,12 @@ export default function UploadDocumentPage() {
       body: file,
     })
       .then((response) => {
-        console.log(response.status);
-
         if (!response.ok) {
           return response.json().then((data) => {
             throw Error(data.error);
           });
         }
-        return response.json(); // Succes (status 201)
+        return response.json();
       })
       .then((data) => {
         const pdf_hash = data.result.stored_pdf.pdf_hash;

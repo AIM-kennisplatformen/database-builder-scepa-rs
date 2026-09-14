@@ -2,11 +2,24 @@ import { ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { TEXT_REGEX, isValidField } from "../utils/validation";
 
-const AUTHOR_FIELDS = [
+// Must match the backend's ContributorRole enum exactly (snake_case
+// "author"/"editor") — it rejects the whole save request otherwise.
+const ROLE_OPTIONS = [
+  { value: "author", label: "Author" },
+  { value: "editor", label: "Editor" },
+];
+
+export const AUTHOR_FIELDS = [
   { key: "forename", label: "Forename", regex: TEXT_REGEX },
   { key: "surname", label: "Surname", regex: TEXT_REGEX },
   { key: "affiliation", label: "Affiliation", regex: TEXT_REGEX },
-  { key: "role", label: "Role", regex: TEXT_REGEX },
+  {
+    key: "role",
+    label: "Role",
+    type: "select",
+    options: ROLE_OPTIONS,
+    regex: "^(author|editor)$",
+  },
 ];
 
 function getInitials(author) {
@@ -65,25 +78,50 @@ export default function AuthorDisplay({ author, onChange, onDelete }) {
         <div className="p-2">
           {AUTHOR_FIELDS.map((field) => {
             const value =
-              field.key === "affiliation"
-                ? (stripAffiliationNumber(author.affiliation) ?? "")
-                : (author[field.key] ?? "");
+              field.type === "select"
+                ? (author[field.key] ?? field.options[0].value)
+                : field.key === "affiliation"
+                  ? (stripAffiliationNumber(author.affiliation) ?? "")
+                  : (author[field.key] ?? "");
 
             return (
               <div className="flex flex-col py-1" key={field.key}>
                 <label className="text-sm text-primary font-medium">
                   {field.label}
                 </label>
-                <input
-                  className={`bg-accent text-black rounded px-2 py-1 border ${
-                    fieldErrors[field.key] ? "border-red-500" : "border-border"
-                  }`}
-                  value={value}
-                  onChange={(e) =>
-                    handleChange(field.key, field.regex, e.target.value)
-                  }
-                  aria-invalid={fieldErrors[field.key] || undefined}
-                />
+                {field.type === "select" ? (
+                  <select
+                    className={`bg-accent text-black rounded px-2 py-1 border ${
+                      fieldErrors[field.key]
+                        ? "border-red-500"
+                        : "border-border"
+                    }`}
+                    value={value}
+                    onChange={(e) =>
+                      handleChange(field.key, field.regex, e.target.value)
+                    }
+                    aria-invalid={fieldErrors[field.key] || undefined}
+                  >
+                    {field.options.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className={`bg-accent text-black rounded px-2 py-1 border ${
+                      fieldErrors[field.key]
+                        ? "border-red-500"
+                        : "border-border"
+                    }`}
+                    value={value}
+                    onChange={(e) =>
+                      handleChange(field.key, field.regex, e.target.value)
+                    }
+                    aria-invalid={fieldErrors[field.key] || undefined}
+                  />
+                )}
                 {fieldErrors[field.key] && (
                   <span className="text-xs text-red-500">
                     Invalid format for {field.label.toLowerCase()}.
