@@ -83,8 +83,8 @@ impl ArtifactRestateService {
             .get_case(case_id.into_inner())
             .await
             .map_err(to_postgres_handler_error)?
-            .filter(|case| case.status == "pending")
-            .ok_or_else(|| TerminalError::new("pending review case not found"))?;
+            .filter(|case| matches!(case.status.as_str(), "pending" | "resolved"))
+            .ok_or_else(|| TerminalError::new("pending or resolved review case not found"))?;
         let pdf_hash = case
             .pdf_hash
             .clone()

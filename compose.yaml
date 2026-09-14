@@ -86,6 +86,8 @@ services:
         condition: service_healthy
       typedb:
         condition: service_healthy
+      app:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:

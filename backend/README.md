@@ -89,3 +89,31 @@ Replace the target URL, API key, and collection name for the destination.
 
 Runtime services and environment variables are managed from the repository
 root with `docker compose` and `.env`.
+
+## Repeating document operations
+
+Each ordinary `POST /pdfs` and document/draft/repair `PUT` starts a fresh
+Restate workflow, even when the arguments are identical. Upload responses return
+an opaque, unique `workflow_id`; use `pdf_hash` to identify the stored document.
+Retries inside that invocation retain the same parent and child workflow IDs.
+Repeated HTTP requests create independent work and do not guarantee ordering
+when submitted concurrently.
+
+Re-uploading a published PDF runs extraction again, preserves manual corrections
+from its current draft (or published artifact if no draft exists), and updates
+the existing graph and vectors. Repairs accept pending and resolved cases;
+repeating a resolved repair leaves its original resolution metadata intact.
+The review list and review GET endpoint still expose only pending cases.
+
+`POST /pdfs/submissions/{workflow_id}` and the CLI retain caller-selected IDs.
+Use a different identifier to start another explicitly named submission.
+
+Identity conflicts return HTTP `409` with the existing `{"error":"…"}` body:
+workflow/PDF mismatches, duplicate records, canonical key/uniqueness conflicts,
+and duplicate passage identities. These are terminal workflow failures, not
+transient errors to retry. Other upstream failures continue to return `502`.
+An accepted asynchronous submission can still fail later; its `202` response
+only confirms acceptance, not successful publication.
+
+Before deploying these changed workflow sequences, drain active Restate
+invocations. Existing completed workflow history needs no deletion or migration.

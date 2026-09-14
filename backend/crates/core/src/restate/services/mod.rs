@@ -71,18 +71,23 @@ where
 }
 
 fn to_handler_error(error: PipelineExecutionError) -> HandlerError {
-    match error.disposition() {
-        FailureDisposition::Retryable => HandlerError::from(error),
-        FailureDisposition::Terminal => TerminalError::new(error.to_string()).into(),
+    let disposition = error.disposition();
+    let source = error.into_source();
+    if let Some(conflict) = crate::conflict::classify(&source) {
+        return conflict.terminal().into();
+    }
+    match disposition {
+        FailureDisposition::Retryable => {
+            HandlerError::from(std::io::Error::other(source.to_string()))
+        }
+        FailureDisposition::Terminal => TerminalError::new(source.to_string()).into(),
     }
 }
 
 pub(super) fn to_postgres_handler_error(error: eros::ErrorUnion) -> HandlerError {
-    let is_conflict = error
-        .downcast_inner_ref::<std::io::Error>()
-        .is_some_and(|error| error.kind() == std::io::ErrorKind::AlreadyExists);
-    if is_conflict {
-        TerminalError::new(error.to_string()).into()
+    if let Some(conflict) = crate::conflict::classify(&error) {
+        tracing::warn!(error = %error, "storage conflict");
+        conflict.terminal().into()
     } else {
         std::io::Error::other(error.to_string()).into()
     }
