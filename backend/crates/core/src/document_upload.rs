@@ -1,9 +1,6 @@
 //! Transport-independent entry workflow for PDF uploads.
 
-use crate::pipeline::{
-    PipelineService,
-    garage::{GaragePipelineService, sha256_hex},
-};
+use crate::pipeline::{PipelineService, garage::GaragePipelineService};
 use crate::restate::{RestateClient, workflows::NewDocumentWorkflowResponse};
 
 #[derive(Clone)]
@@ -25,7 +22,7 @@ impl DocumentUpload {
 
     /// Stores a PDF and runs the complete new-document workflow.
     pub async fn run(&self, pdf: Vec<u8>) -> std::io::Result<ReviewedUpload> {
-        let workflow_id = sha256_hex(&pdf);
+        let workflow_id = format!("upload:{}", uuid::Uuid::new_v4());
         let stored = self.store(&workflow_id, &pdf).await?;
         let result = self
             .restate
@@ -61,6 +58,6 @@ impl DocumentUpload {
             .execute(workflow_id, &pdf.to_vec())
             .await
             .map(|outcome| outcome.into_output(|_| {}))
-            .map_err(|error| std::io::Error::other(error.to_string()))
+            .map_err(crate::conflict::pipeline_io_error)
     }
 }

@@ -94,7 +94,7 @@ impl TypeDbRestateService {
         self.service
             .execute(&canonical)
             .await
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
+            .map_err(to_postgres_handler_error)?;
         Ok(Json(canonical))
     }
 
@@ -127,7 +127,7 @@ impl TypeDbRestateService {
             .service
             .execute_update(&old, &new)
             .await
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
+            .map_err(to_postgres_handler_error)?;
         Ok(Json(TypeDbUpdateResponse {
             canonical: new,
             changes,

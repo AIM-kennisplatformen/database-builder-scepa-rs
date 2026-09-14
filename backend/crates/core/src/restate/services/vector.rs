@@ -63,7 +63,9 @@ impl VectorRestateService {
 }
 
 fn to_handler_error(error: VectorPipelineError) -> HandlerError {
-    if error.is_terminal() {
+    if matches!(error, VectorPipelineError::DuplicateIdentity { .. }) {
+        crate::conflict::Conflict::PassageIdentity.terminal().into()
+    } else if error.is_terminal() {
         TerminalError::new(error.to_string()).into()
     } else {
         std::io::Error::other(error.to_string()).into()

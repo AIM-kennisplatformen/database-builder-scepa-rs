@@ -8,7 +8,8 @@ use crate::{
         services::{
             ArtifactRestateServiceClient, GarageRestateServiceClient, LinkWorkflowPdfRequest,
             StoreArtifactRequest, TypeDbExecuteRequest, TypeDbRestateServiceClient,
-            VectorExecuteRequest, VectorRestateServiceClient,
+            TypeDbUpdateRequest, VectorExecuteRequest, VectorRestateServiceClient,
+            VectorUpdateRequest,
         },
         workflows::{DocumentExtractionWorkflowClient, DocumentExtractionWorkflowRequest},
     },
@@ -63,25 +64,64 @@ impl NewDocumentWorkflow {
             .call()
             .await?
             .into_inner();
-        let draft = DraftDocument::new(extracted.output);
-        let effective_document = draft.effective_document();
-        let canonical = ctx
-            .service_client::<TypeDbRestateServiceClient>()
-            .execute(Json(TypeDbExecuteRequest {
-                workflow_id,
-                pdf_hash: stored.pdf_hash.clone(),
-                document: effective_document.clone(),
-            }))
+        let draft = ctx
+            .service_client::<ArtifactRestateServiceClient>()
+            .get_draft(Json(stored.pdf_hash.clone()))
+            .call()
+            .await?
+            .into_inner()
+            .ok_or_else(|| {
+                restate_sdk::prelude::TerminalError::new("document artifact was not found")
+            })?;
+        let old = ctx
+            .service_client::<ArtifactRestateServiceClient>()
+            .get_published(Json(stored.pdf_hash.clone()))
             .call()
             .await?
             .into_inner();
-        ctx.service_client::<VectorRestateServiceClient>()
-            .execute(Json(VectorExecuteRequest {
-                pdf_hash: stored.pdf_hash.clone(),
-                document: effective_document,
-            }))
-            .call()
-            .await?;
+        let effective_document = draft.effective_document();
+        let canonical = if let Some(old) = old {
+            let old_document = old.effective_document();
+            let updated = ctx
+                .service_client::<TypeDbRestateServiceClient>()
+                .update(Json(TypeDbUpdateRequest {
+                    workflow_id,
+                    pdf_hash: stored.pdf_hash.clone(),
+                    old_document: old_document.clone(),
+                    new_document: effective_document.clone(),
+                }))
+                .call()
+                .await?
+                .into_inner();
+            ctx.service_client::<VectorRestateServiceClient>()
+                .update(Json(VectorUpdateRequest {
+                    pdf_hash: stored.pdf_hash.clone(),
+                    old_document,
+                    new_document: effective_document,
+                }))
+                .call()
+                .await?;
+            updated.canonical
+        } else {
+            let canonical = ctx
+                .service_client::<TypeDbRestateServiceClient>()
+                .execute(Json(TypeDbExecuteRequest {
+                    workflow_id,
+                    pdf_hash: stored.pdf_hash.clone(),
+                    document: effective_document.clone(),
+                }))
+                .call()
+                .await?
+                .into_inner();
+            ctx.service_client::<VectorRestateServiceClient>()
+                .execute(Json(VectorExecuteRequest {
+                    pdf_hash: stored.pdf_hash.clone(),
+                    document: effective_document,
+                }))
+                .call()
+                .await?;
+            canonical
+        };
         ctx.service_client::<ArtifactRestateServiceClient>()
             .store_published(Json(StoreArtifactRequest {
                 pdf_hash: stored.pdf_hash.clone(),

@@ -1004,6 +1004,46 @@ mod tests {
         result.unwrap();
     }
 
+    #[tokio::test]
+    #[ignore = "requires a local TypeDB service and creates a temporary database"]
+    async fn duplicate_graph_identity_is_classified_as_a_conflict() {
+        let (address, _, username, password) = live_typedb_settings();
+        let database = format!("scepa_conflict_test_{}", uuid::Uuid::new_v4().simple());
+        let driver = TypeDBDriver::new(
+            Addresses::try_from_address_str(&address).unwrap(),
+            Credentials::new(&username, &password),
+            DriverOptions::new(DriverTlsConfig::disabled()),
+        )
+        .await
+        .unwrap();
+        let service = TypeDbService::from_driver(driver, &database);
+        service.ensure_schema().await.unwrap();
+        let result = async {
+            let model = expanded_canonical();
+            service.execute(&model).await?;
+            Ok::<_, eros::ErrorUnion>(service.execute(&model).await)
+        }
+        .await;
+        service
+            .store
+            .driver
+            .databases()
+            .get(&database)
+            .await
+            .unwrap()
+            .delete()
+            .await
+            .unwrap();
+        let error = result
+            .unwrap()
+            .expect_err("duplicate insertion should fail");
+        assert_eq!(
+            crate::conflict::classify(&error),
+            Some(crate::conflict::Conflict::CanonicalIdentity),
+            "{error}"
+        );
+    }
+
     fn live_typedb_settings() -> (String, String, String, String) {
         let config = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.env"),

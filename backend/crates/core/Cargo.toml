@@ -25,7 +25,8 @@ tokio = { version = "1.53.1", features = ["fs", "sync", "time"] }
 tracing = "0.1.41"
 typedb-driver = "3.12.3"
 utoipa = { version = "5.5.0", features = ["rc_schema"] }
-uuid = { version = "1.18.1", features = ["v5"] }
+uuid = { version = "1.18.1", features = ["v4", "v5"] }
 
 [dev-dependencies]
+axum = "0.8.4"
 tokio = { version = "1.53.1", features = ["fs", "macros", "rt-multi-thread"] }

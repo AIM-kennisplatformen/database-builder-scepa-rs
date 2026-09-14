@@ -254,6 +254,7 @@ async fn download_pdf(
     responses(
         (status = 201, description = "Document processed", body = UploadResponse),
         (status = 413, description = "PDF exceeds the upload limit", body = ErrorResponse),
+        (status = 409, description = "Conflicting data or workflow identity", body = ErrorResponse),
         (status = 502, description = "Pipeline or workflow error", body = ErrorResponse)
     ),
     tag = "documents"
@@ -282,6 +283,7 @@ async fn upload_pdf(
         (status = 202, description = "Submission accepted", body = SubmissionResponse),
         (status = 400, description = "Invalid submission", body = ErrorResponse),
         (status = 413, description = "PDF exceeds the upload limit", body = ErrorResponse),
+        (status = 409, description = "Conflicting data or workflow identity", body = ErrorResponse),
         (status = 502, description = "Pipeline or workflow error", body = ErrorResponse)
     ),
     tag = "documents"
@@ -345,6 +347,7 @@ async fn get_draft(
         (status = 413, description = "Request body exceeds the upload limit", body = ErrorResponse),
         (status = 415, description = "Unsupported media type", body = ErrorResponse),
         (status = 422, description = "Invalid request data", body = ErrorResponse),
+        (status = 409, description = "Conflicting data or workflow identity", body = ErrorResponse),
         (status = 502, description = "Workflow error", body = ErrorResponse)
     ),
     tag = "documents"
@@ -450,6 +453,7 @@ async fn get_document_requiring_fixing(
         (status = 413, description = "Request body exceeds the upload limit", body = ErrorResponse),
         (status = 415, description = "Unsupported media type", body = ErrorResponse),
         (status = 422, description = "Invalid request data", body = ErrorResponse),
+        (status = 409, description = "Conflicting data or workflow identity", body = ErrorResponse),
         (status = 502, description = "Workflow error", body = ErrorResponse)
     ),
     tag = "review"
@@ -513,6 +517,7 @@ async fn get_published_document(
         (status = 413, description = "Request body exceeds the upload limit", body = ErrorResponse),
         (status = 415, description = "Unsupported media type", body = ErrorResponse),
         (status = 422, description = "Invalid request data", body = ErrorResponse),
+        (status = 409, description = "Conflicting data or workflow identity", body = ErrorResponse),
         (status = 502, description = "Workflow error", body = ErrorResponse)
     ),
     tag = "documents"
@@ -564,7 +569,13 @@ fn internal(error: impl std::fmt::Display) -> ApiError {
     )
 }
 
-fn upstream(error: impl std::fmt::Display) -> ApiError {
+fn upstream(error: std::io::Error) -> ApiError {
+    if let Some(conflict) = error
+        .get_ref()
+        .and_then(|error| error.downcast_ref::<scepa::conflict::Conflict>())
+    {
+        return ApiError(StatusCode::CONFLICT, conflict.to_string());
+    }
     tracing::error!(error = %error, "API request failed through an upstream service");
     ApiError(
         StatusCode::BAD_GATEWAY,
@@ -623,6 +634,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn conflicts_reach_http_as_safe_json() {
+        for conflict in [
+            scepa::conflict::Conflict::WorkflowPdf,
+            scepa::conflict::Conflict::Record,
+            scepa::conflict::Conflict::CanonicalIdentity,
+            scepa::conflict::Conflict::PassageIdentity,
+            scepa::conflict::Conflict::Submission,
+        ] {
+            assert_error_response(
+                normalize_framework_error(upstream(conflict.into_io()).into_response()),
+                StatusCode::CONFLICT,
+                &conflict.to_string(),
+            )
+            .await;
+        }
+    }
+
+    #[tokio::test]
     async fn api_errors_are_json_objects_with_safe_messages() {
         assert_error_response(
             ApiError(StatusCode::NOT_FOUND, "PDF not found".into()).into_response(),
@@ -637,7 +666,7 @@ mod tests {
         )
         .await;
         assert_error_response(
-            upstream("workflow internals leaked").into_response(),
+            upstream(std::io::Error::other("workflow internals leaked")).into_response(),
             StatusCode::BAD_GATEWAY,
             "Upstream service unavailable",
         )

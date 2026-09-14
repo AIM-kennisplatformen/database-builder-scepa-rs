@@ -3,7 +3,7 @@
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::{models::draft::ManualDocument, pipeline::garage::sha256_hex};
+use crate::models::draft::ManualDocument;
 
 use super::workflows::{
     FixDocumentWorkflowRequest, FixDocumentWorkflowResponse, NewDocumentWorkflowRequest,
@@ -90,9 +90,12 @@ impl RestateClient {
         &self,
         request: FixDocumentWorkflowRequest,
     ) -> std::io::Result<FixDocumentWorkflowResponse> {
-        let revision = revision(&request.manual_data)?;
-        self.run_fix_document(&format!("case:{}:fix:{revision}", request.case_id), request)
-            .await
+        let invocation = uuid::Uuid::new_v4();
+        self.run_fix_document(
+            &format!("case:{}:fix:{invocation}", request.case_id),
+            request,
+        )
+        .await
     }
 
     /// Starts a new-document workflow without waiting for its result.
@@ -171,7 +174,7 @@ impl RestateClient {
         pdf_hash: String,
         manual_data: ManualDocument,
     ) -> std::io::Result<UpdateDocumentWorkflowResponse> {
-        let workflow_id = format!("{pdf_hash}:{operation}:{}", revision(&manual_data)?);
+        let workflow_id = format!("{pdf_hash}:{operation}:{}", uuid::Uuid::new_v4());
         self.run_update_document(
             &workflow_id,
             UpdateDocumentWorkflowRequest {
@@ -244,6 +247,32 @@ async fn response_error(
 ) -> std::io::Error {
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
+    workflow_response_error(workflow, workflow_id, status, &body)
+}
+
+fn workflow_response_error(
+    workflow: &str,
+    workflow_id: &str,
+    status: reqwest::StatusCode,
+    body: &str,
+) -> std::io::Error {
+    let payload = serde_json::from_str::<serde_json::Value>(body).ok();
+    if status == reqwest::StatusCode::CONFLICT
+        || payload
+            .as_ref()
+            .and_then(|value| value.get("code"))
+            .and_then(|code| code.as_u64())
+            == Some(409)
+    {
+        let conflict = payload
+            .as_ref()
+            .and_then(|value| value.get("message"))
+            .and_then(|message| message.as_str())
+            .and_then(crate::conflict::Conflict::from_message)
+            .unwrap_or(crate::conflict::Conflict::Submission);
+        tracing::warn!(%workflow, %workflow_id, %status, "Restate workflow conflict");
+        return conflict.into_io();
+    }
     std::io::Error::other(format!(
         "{workflow} {workflow_id} failed through Restate with {status}: {body}"
     ))
@@ -257,15 +286,120 @@ fn connection_error(error: reqwest::Error) -> std::io::Error {
     std::io::Error::other(error)
 }
 
-fn revision(manual_data: &ManualDocument) -> std::io::Result<String> {
-    serde_json::to_vec(manual_data)
-        .map(|bytes| sha256_hex(&bytes))
-        .map_err(std::io::Error::other)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn ordinary_requests_get_fresh_ids_but_explicit_ids_are_preserved() {
+        use axum::{
+            Router,
+            body::Bytes,
+            extract::State,
+            http::{StatusCode, Uri},
+        };
+        use std::sync::{Arc, Mutex};
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let app = Router::new()
+            .fallback(
+                |State(captured): State<Arc<Mutex<Vec<(String, Vec<u8>)>>>>,
+                 uri: Uri,
+                 body: Bytes| async move {
+                    captured
+                        .lock()
+                        .unwrap()
+                        .push((uri.path().to_owned(), body.to_vec()));
+                    StatusCode::BAD_GATEWAY
+                },
+            )
+            .with_state(captured.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client =
+            RestateClient::new(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        for _ in 0..2 {
+            assert!(
+                client
+                    .publish_draft("pdf".into(), ManualDocument::default())
+                    .await
+                    .is_err()
+            );
+            assert!(
+                client
+                    .update_document("pdf".into(), ManualDocument::default())
+                    .await
+                    .is_err()
+            );
+            assert!(
+                client
+                    .fix_document(FixDocumentWorkflowRequest {
+                        case_id: 1,
+                        manual_data: ManualDocument::default(),
+                        enrich: false
+                    })
+                    .await
+                    .is_err()
+            );
+            assert!(
+                client
+                    .run_new_document("explicit", "pdf".into())
+                    .await
+                    .is_err()
+            );
+            assert!(
+                client
+                    .submit_new_document("explicit", "pdf".into())
+                    .await
+                    .is_err()
+            );
+        }
+        let requests = captured.lock().unwrap();
+        for i in 0..3 {
+            assert_ne!(requests[i].0, requests[i + 5].0);
+            assert_eq!(requests[i].1, requests[i + 5].1);
+        }
+        assert_eq!(requests[3], requests[8]);
+        assert_eq!(requests[4], requests[9]);
+        server.abort();
+    }
+
+    #[test]
+    fn conflict_responses_preserve_only_safe_messages() {
+        for conflict in [
+            crate::conflict::Conflict::WorkflowPdf,
+            crate::conflict::Conflict::Record,
+            crate::conflict::Conflict::CanonicalIdentity,
+            crate::conflict::Conflict::PassageIdentity,
+        ] {
+            let body = serde_json::json!({"code":409,"message":conflict.to_string()}).to_string();
+            let error =
+                workflow_response_error("workflow", "key", reqwest::StatusCode::CONFLICT, &body);
+            assert_eq!(
+                error
+                    .get_ref()
+                    .unwrap()
+                    .downcast_ref::<crate::conflict::Conflict>(),
+                Some(&conflict)
+            );
+        }
+        let error = workflow_response_error(
+            "workflow",
+            "key",
+            reqwest::StatusCode::CONFLICT,
+            "secret internal details",
+        );
+        assert_eq!(error.to_string(), "Workflow has already been submitted");
+        assert_eq!(
+            workflow_response_error(
+                "workflow",
+                "key",
+                reqwest::StatusCode::BAD_GATEWAY,
+                "offline"
+            )
+            .kind(),
+            std::io::ErrorKind::Other
+        );
+    }
 
     #[test]
     fn workflow_keys_are_encoded_as_one_path_segment() {
