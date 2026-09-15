@@ -139,22 +139,34 @@ impl CanonicalModel {
                 eros::bail!("canonical contributor {} requires a name", index + 1)
             }
 
+            let person_id = non_empty(Some(&contributor.id))
+                .map(str::to_owned)
+                .unwrap_or_else(|| {
+                    format!(
+                        "{}:contributor:{}",
+                        document.entity.document_id(),
+                        index + 1
+                    )
+                });
+            let contribution_id = non_empty(Some(&contributor.contribution_id))
+                .map(str::to_owned)
+                .unwrap_or_else(|| {
+                    scoped_id(document.entity.document_id(), "contribution", &person_id)
+                });
             let person = Arc::new(EPerson::from(Person {
-                person_id: format!(
-                    "{}:contributor:{}",
-                    document.entity.document_id(),
-                    index + 1
-                ),
+                person_id,
                 given_name,
                 family_name,
             }));
             let contributor_role = Arc::new(EContributor::Person(person.clone()));
             let relation = match contributor.role {
                 ContributorRole::Author => Arc::new(EContribution::from(Authorship {
+                    contribution_id: contribution_id.clone(),
                     contributor: contributor_role.clone(),
                     work: document.contribution_work.clone(),
                 })),
                 ContributorRole::Editor => Arc::new(EContribution::from(Contribution {
+                    contribution_id,
                     contributor: contributor_role.clone(),
                     work: document.contribution_work.clone(),
                 })),
@@ -169,29 +181,37 @@ impl CanonicalModel {
         let mut affiliations: Vec<Arc<EAffiliation>> = Vec::new();
 
         for (source, person) in draft.bibliography.authors.iter().zip(&person_affiliates) {
-            let Some(organization_name) = non_empty(source.affiliation.as_deref()) else {
+            let Some(source_affiliation) = &source.affiliation else {
                 continue;
             };
-            let normalized_name = normalize_name(organization_name);
-            let organization =
-                if let Some(existing) = affiliation_organizations.get(&normalized_name) {
-                    existing.clone()
-                } else {
-                    let organization_id = scoped_id(
+            let organization_name = source_affiliation.organization.name.trim();
+            if organization_name.is_empty() {
+                continue;
+            }
+            let organization_id = non_empty(Some(&source_affiliation.organization.id))
+                .map(str::to_owned)
+                .unwrap_or_else(|| {
+                    scoped_id(
                         document.entity.document_id(),
                         "organization",
-                        &normalized_name,
-                    );
+                        &normalize_name(organization_name),
+                    )
+                });
+            let organization =
+                if let Some(existing) = affiliation_organizations.get(&organization_id) {
+                    existing.clone()
+                } else {
                     let node = organization_node(Organization {
-                        organization_id,
+                        organization_id: organization_id.clone(),
                         organization_name: organization_name.to_owned(),
-                        ror_id: None,
+                        ror_id: source_affiliation.organization.ror_id.clone(),
                     });
                     organizations.push(node.entity);
-                    affiliation_organizations.insert(normalized_name, node.affiliation.clone());
+                    affiliation_organizations.insert(organization_id, node.affiliation.clone());
                     node.affiliation
                 };
             affiliations.push(Arc::new(EAffiliation::from(Affiliation {
+                affiliation_id: source_affiliation.id.clone(),
                 person: person.clone(),
                 organization,
                 evidence: NEVec::new(document.evidence.clone()),
@@ -201,36 +221,53 @@ impl CanonicalModel {
         let mut publication_venues: Vec<Arc<EPublicationVenue>> = Vec::new();
         let mut publication_events: Vec<Arc<EPublicationEvent>> = Vec::new();
         if let Some(publication_date) = publication_datetime(draft) {
-            let publisher = non_empty(draft.bibliography.publisher.as_deref()).map(|name| {
-                let node = organization_node(Publisher {
-                    organization_id: scoped_id(
-                        document.entity.document_id(),
-                        "publisher",
-                        &normalize_name(name),
-                    ),
-                    organization_name: name.to_owned(),
-                    ror_id: None,
+            let publisher = draft
+                .bibliography
+                .publisher
+                .as_ref()
+                .filter(|value| !value.name.trim().is_empty())
+                .map(|source| {
+                    let name = source.name.trim();
+                    let node = organization_node(Publisher {
+                        organization_id: source.id.clone(),
+                        organization_name: name.to_owned(),
+                        ror_id: source.ror_id.clone(),
+                    });
+                    organizations.push(node.entity);
+                    node.publisher
                 });
-                organizations.push(node.entity);
-                node.publisher
-            });
-            let venue = non_empty(draft.bibliography.journal.as_deref()).map(|name| {
-                let node = venue_node(Journal {
-                    venue_id: scoped_id(
-                        document.entity.document_id(),
-                        "journal",
-                        &normalize_name(name),
-                    ),
-                    issn: identifier(&draft.bibliography.identifiers, |kind| {
-                        matches!(kind, IdentifierKind::Issn)
-                    })
-                    .map(str::to_owned),
-                    venue_name: name.to_owned(),
+            let venue = draft
+                .bibliography
+                .journal
+                .as_ref()
+                .filter(|value| !value.name.trim().is_empty())
+                .map(|source| {
+                    let name = source.name.trim();
+                    let node = venue_node(Journal {
+                        venue_id: source.id.clone(),
+                        issn: source.issn.clone().or_else(|| {
+                            identifier(&draft.bibliography.identifiers, |kind| {
+                                matches!(kind, IdentifierKind::Issn)
+                            })
+                            .map(str::to_owned)
+                        }),
+                        venue_name: name.to_owned(),
+                    });
+                    publication_venues.push(node.entity);
+                    node.publication_venue
                 });
-                publication_venues.push(node.entity);
-                node.publication_venue
-            });
             publication_events.push(Arc::new(EPublicationEvent::from(Publication {
+                publication_event_id: draft
+                    .bibliography
+                    .publication_event_id
+                    .clone()
+                    .unwrap_or_else(|| {
+                        scoped_id(
+                            document.entity.document_id(),
+                            "publication-event",
+                            &publication_date.to_string(),
+                        )
+                    }),
                 publisher,
                 venue,
                 work: document.publication_work.clone(),
@@ -268,12 +305,13 @@ fn canonical_document(
     let Some(title) = non_empty(draft.bibliography.title.as_deref()) else {
         eros::bail!("canonical document requires a title")
     };
+    let stable_document_id = non_empty(Some(&draft.id)).map(str::to_owned);
     let doi = identifier(&draft.bibliography.identifiers, |kind| {
         matches!(kind, IdentifierKind::Doi)
     });
     if let Some(doi) = doi {
         return Ok(document_node(ResearchPaper {
-            document_id: doi.to_owned(),
+            document_id: stable_document_id.clone().unwrap_or_else(|| doi.to_owned()),
             pdf_hash,
             title: title.to_owned(),
             doi: Some(doi.to_owned()),
@@ -284,22 +322,27 @@ fn canonical_document(
     });
     if let Some(isbn) = isbn {
         return Ok(document_node(Book {
-            document_id: isbn.to_owned(),
+            document_id: stable_document_id
+                .clone()
+                .unwrap_or_else(|| isbn.to_owned()),
             pdf_hash,
             title: title.to_owned(),
             isbn: Some(isbn.to_owned()),
         }));
     }
-    let Some(document_id) = draft
-        .bibliography
-        .identifiers
-        .iter()
-        .filter(|identifier| !matches!(identifier.kind, IdentifierKind::Issn | IdentifierKind::Md5))
-        .map(|identifier| identifier.value.trim())
-        .find(|value| !value.is_empty())
-        .map(str::to_owned)
-        .or(fallback_document_id)
-    else {
+    let Some(document_id) = stable_document_id.or_else(|| {
+        draft
+            .bibliography
+            .identifiers
+            .iter()
+            .filter(|identifier| {
+                !matches!(identifier.kind, IdentifierKind::Issn | IdentifierKind::Md5)
+            })
+            .map(|identifier| identifier.value.trim())
+            .find(|value| !value.is_empty())
+            .map(str::to_owned)
+            .or(fallback_document_id)
+    }) else {
         eros::bail!("canonical document requires a stable document identifier")
     };
     Ok(document_node(Document {
@@ -378,11 +421,14 @@ mod tests {
 
     fn draft(title: Option<&str>, identifiers: Vec<Identifier>) -> TeiDocument {
         TeiDocument {
+            id: String::new(),
             level: PassageLevel::Paragraph,
             bibliography: Bibliography {
                 title: title.map(str::to_owned),
                 identifiers,
                 authors: vec![Contributor {
+                    id: String::new(),
+                    contribution_id: String::new(),
                     name: "Ada Lovelace".to_owned(),
                     forename: Some("Ada".to_owned()),
                     surname: Some("Lovelace".to_owned()),
@@ -393,7 +439,6 @@ mod tests {
             },
             body_text: vec![],
             figures_and_tables: vec![],
-            references: vec![],
         }
     }
 
@@ -485,6 +530,8 @@ mod tests {
         );
         draft.bibliography.authors[0].affiliation = Some(" Example   University ".into());
         draft.bibliography.authors.push(Contributor {
+            id: String::new(),
+            contribution_id: String::new(),
             name: "Grace Hopper".into(),
             forename: Some("Grace".into()),
             surname: Some("Hopper".into()),
@@ -499,6 +546,45 @@ mod tests {
         assert_eq!(
             canonical.affiliations[0].organization().organization_id(),
             canonical.affiliations[1].organization().organization_id()
+        );
+    }
+
+    #[test]
+    fn canonical_graph_preserves_normalized_entity_and_relation_ids() {
+        use crate::models::canonical::relations::{
+            affiliation::TAffiliation, contribution::TContribution,
+            publication_event::TPublicationEvent,
+        };
+
+        let hash = "a".repeat(64);
+        let mut source = draft(
+            Some("A paper"),
+            vec![
+                id(IdentifierKind::Doi, "10.1234/example"),
+                id(IdentifierKind::Issn, "1234-5678"),
+            ],
+        );
+        source.bibliography.authors[0].affiliation = Some("Example University".into());
+        source.bibliography.publisher = Some("Example Press".into());
+        source.bibliography.journal = Some("Example Journal".into());
+        source.bibliography.publication_date = Some("2024-05-06".into());
+        source.assign_extracted_ids(&hash);
+        let canonical = CanonicalModel::try_from_with_pdf_hash(&source, &hash).unwrap();
+        let author = &source.bibliography.authors[0];
+
+        assert_eq!(canonical.document.document_id(), source.id);
+        assert_eq!(canonical.persons[0].person_id(), author.id);
+        assert_eq!(
+            canonical.contributions[0].contribution_id(),
+            author.contribution_id
+        );
+        assert_eq!(
+            canonical.affiliations[0].affiliation_id(),
+            author.affiliation.as_ref().unwrap().id
+        );
+        assert_eq!(
+            canonical.publication_events[0].publication_event_id(),
+            source.bibliography.publication_event_id.as_deref().unwrap()
         );
     }
 }

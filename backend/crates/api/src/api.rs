@@ -4,7 +4,7 @@ use axum::{
     Json, Router,
     body::{Body, Bytes},
     extract::{DefaultBodyLimit, Path, State},
-    http::{HeaderValue, Request, StatusCode, header},
+    http::{HeaderMap, HeaderValue, Request, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -97,6 +97,7 @@ struct ErrorResponse {
     error: String,
 }
 
+#[derive(Debug)]
 struct ApiError(StatusCode, String);
 
 #[derive(Clone, Copy)]
@@ -337,7 +338,10 @@ async fn get_draft(
 #[utoipa::path(
     put,
     path = "/drafts/{pdf_hash}",
-    params(("pdf_hash" = String, Path, description = "SHA-256 hash of the PDF")),
+    params(
+        ("pdf_hash" = String, Path, description = "SHA-256 hash of the PDF"),
+        ("Idempotency-Key" = Option<String>, Header, description = "Required when the request creates objects without IDs")
+    ),
     request_body(content = ManualDocument, description = "Manual document corrections"),
     responses(
         (status = 200, description = "Published document", body = PublishResponse),
@@ -352,8 +356,11 @@ async fn get_draft(
 async fn publish_draft(
     State(state): State<AppState>,
     Path(pdf_hash): Path<String>,
-    Json(manual_data): Json<ManualDocument>,
+    headers: HeaderMap,
+    Json(mut manual_data): Json<ManualDocument>,
 ) -> Result<Json<PublishResponse>, ApiError> {
+    assign_request_ids(&pdf_hash, &headers, &mut manual_data)?;
+    validate_manual_update(&state, &pdf_hash, &manual_data).await?;
     let published = state
         .restate
         .publish_draft(pdf_hash.clone(), manual_data)
@@ -442,7 +449,10 @@ async fn get_document_requiring_fixing(
 #[utoipa::path(
     put,
     path = "/documents/requiring-fixing/{case_id}",
-    params(("case_id" = i64, Path, description = "Review case identifier")),
+    params(
+        ("case_id" = i64, Path, description = "Review case identifier"),
+        ("Idempotency-Key" = Option<String>, Header, description = "Required when the request creates objects without IDs")
+    ),
     request_body(content = RepairDocumentRequest),
     responses(
         (status = 200, description = "Repaired and published document", body = PublishResponse),
@@ -457,8 +467,12 @@ async fn get_document_requiring_fixing(
 async fn fix_document(
     State(state): State<AppState>,
     Path(case_id): Path<i64>,
-    Json(request): Json<RepairDocumentRequest>,
+    headers: HeaderMap,
+    Json(mut request): Json<RepairDocumentRequest>,
 ) -> Result<Json<PublishResponse>, ApiError> {
+    let repair = load_repair(&state.drafts, case_id).await?;
+    assign_request_ids(&repair.pdf_hash, &headers, &mut request.manual_data)?;
+    validate_artifact_update(repair.draft, &request.manual_data)?;
     let result = state
         .restate
         .fix_document(FixDocumentWorkflowRequest {
@@ -505,7 +519,10 @@ async fn get_published_document(
 #[utoipa::path(
     put,
     path = "/documents/{pdf_hash}",
-    params(("pdf_hash" = String, Path, description = "SHA-256 hash of the PDF")),
+    params(
+        ("pdf_hash" = String, Path, description = "SHA-256 hash of the PDF"),
+        ("Idempotency-Key" = Option<String>, Header, description = "Required when the request creates objects without IDs")
+    ),
     request_body(content = ManualDocument, description = "Manual document corrections"),
     responses(
         (status = 200, description = "Updated document", body = UpdateDocumentWorkflowResponse),
@@ -520,14 +537,73 @@ async fn get_published_document(
 async fn update_document(
     State(state): State<AppState>,
     Path(pdf_hash): Path<String>,
-    Json(manual_data): Json<ManualDocument>,
+    headers: HeaderMap,
+    Json(mut manual_data): Json<ManualDocument>,
 ) -> Result<Json<UpdateDocumentWorkflowResponse>, ApiError> {
+    assign_request_ids(&pdf_hash, &headers, &mut manual_data)?;
+    validate_manual_update(&state, &pdf_hash, &manual_data).await?;
     let result = state
         .restate
         .update_document(pdf_hash, manual_data)
         .await
         .map_err(upstream)?;
     Ok(Json(result))
+}
+
+async fn validate_manual_update(
+    state: &AppState,
+    pdf_hash: &str,
+    manual_data: &ManualDocument,
+) -> Result<(), ApiError> {
+    let artifact = if let Some(published) = state
+        .drafts
+        .get_published_document(pdf_hash)
+        .await
+        .map_err(internal)?
+    {
+        published.artifact
+    } else {
+        state
+            .drafts
+            .get_draft_document(pdf_hash)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "document artifact not found".into()))?
+    };
+    validate_artifact_update(artifact, manual_data)
+}
+
+fn validate_artifact_update(
+    mut artifact: DraftDocument,
+    manual_data: &ManualDocument,
+) -> Result<(), ApiError> {
+    artifact.manual_data = manual_data.clone();
+    artifact
+        .validate_ids()
+        .map_err(|error| ApiError(StatusCode::UNPROCESSABLE_ENTITY, error))
+}
+
+fn assign_request_ids(
+    pdf_hash: &str,
+    headers: &HeaderMap,
+    manual_data: &mut ManualDocument,
+) -> Result<(), ApiError> {
+    if !manual_data.requires_identity_assignment() {
+        return Ok(());
+    }
+    let idempotency_key = headers
+        .get("idempotency-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::BAD_REQUEST,
+                "Idempotency-Key is required when creating entities".into(),
+            )
+        })?;
+    manual_data.assign_missing_ids(pdf_hash, idempotency_key);
+    Ok(())
 }
 
 async fn load_repair(drafts: &PostgresReviewStore, case_id: i64) -> Result<RepairDraft, ApiError> {
@@ -757,6 +833,15 @@ mod tests {
         for (name, property) in [
             ("ManualDocument", "bibliography"),
             ("DraftDocument", "grobid_extraction_data"),
+            ("TeiDocument", "id"),
+            ("Contributor", "id"),
+            ("Contributor", "contribution_id"),
+            ("DraftAffiliation", "id"),
+            ("DraftOrganization", "id"),
+            ("DraftPublicationVenue", "id"),
+            ("Authorship", "contribution_id"),
+            ("Affiliation", "affiliation_id"),
+            ("Publication", "publication_event_id"),
             ("PublishedDocumentSummary", "identifiers"),
             ("ReviewCase", "workflow_id"),
             ("CanonicalModel", "publication_events"),
@@ -769,6 +854,21 @@ mod tests {
                 schemas[name]["properties"].get(property).is_some(),
                 "{name} is missing its {property} property: {}",
                 schemas[name]
+            );
+        }
+
+        for path in [
+            "/drafts/{pdf_hash}",
+            "/documents/requiring-fixing/{case_id}",
+            "/documents/{pdf_hash}",
+        ] {
+            assert!(
+                document["paths"][path]["put"]["parameters"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|parameter| parameter["name"] == "Idempotency-Key"),
+                "{path} must document Idempotency-Key"
             );
         }
 
@@ -828,5 +928,38 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn new_manual_entities_require_an_idempotency_key_and_receive_stable_ids() {
+        let value = json!({
+            "bibliography": {
+                "authors": [{
+                    "name": "Ada Lovelace",
+                    "forename": "Ada",
+                    "surname": "Lovelace",
+                    "affiliation": {
+                        "organization": { "name": "Example University", "ror_id": null }
+                    },
+                    "role": "author"
+                }]
+            }
+        });
+        let mut without_key: ManualDocument = serde_json::from_value(value.clone()).unwrap();
+        let error =
+            assign_request_ids(&"a".repeat(64), &HeaderMap::new(), &mut without_key).unwrap_err();
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+
+        let mut headers = HeaderMap::new();
+        headers.insert("idempotency-key", HeaderValue::from_static("save-1"));
+        let mut first: ManualDocument = serde_json::from_value(value.clone()).unwrap();
+        let mut retry: ManualDocument = serde_json::from_value(value).unwrap();
+        assign_request_ids(&"a".repeat(64), &headers, &mut first).unwrap();
+        assign_request_ids(&"a".repeat(64), &headers, &mut retry).unwrap();
+        assert_eq!(first, retry);
+        let author = &first.bibliography.authors.as_ref().unwrap()[0];
+        assert!(!author.id.is_empty());
+        assert!(!author.contribution_id.is_empty());
+        assert!(!author.affiliation.as_ref().unwrap().id.is_empty());
     }
 }

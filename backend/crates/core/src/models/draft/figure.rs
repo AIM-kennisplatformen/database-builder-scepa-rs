@@ -12,6 +12,7 @@ pub enum FigureOrTable {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 #[builder(on(String, into))]
 pub struct Figure {
+    #[serde(default)]
     pub id: String,
     pub label: Option<String>,
     pub heading: Option<String>,
@@ -23,6 +24,7 @@ pub struct Figure {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 #[builder(on(String, into))]
 pub struct Table {
+    #[serde(default)]
     pub id: String,
     pub label: Option<String>,
     pub heading: Option<String>,

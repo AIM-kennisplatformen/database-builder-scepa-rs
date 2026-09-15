@@ -1,7 +1,8 @@
 //! Document-level bibliographic metadata and abstract extraction.
 
 use crate::models::draft::{
-    Bibliography, ContributorRole, IdentifierScope, PassageLevel, TextPassage,
+    Bibliography, ContributorRole, DraftOrganization, DraftPublicationVenue, IdentifierKind,
+    IdentifierScope, PassageLevel, TextPassage,
 };
 
 use super::{
@@ -23,7 +24,7 @@ pub(super) fn parse_bibliography(header: &XmlElement, level: PassageLevel) -> Bi
         .filter_map(|author| parse_contributor(author, ContributorRole::Author))
         .collect();
 
-    let identifiers = header
+    let identifiers: Vec<_> = header
         .descendants_named("idno")
         .into_iter()
         .filter_map(|identifier| parse_identifier(identifier, IdentifierScope::Document))
@@ -48,13 +49,27 @@ pub(super) fn parse_bibliography(header: &XmlElement, level: PassageLevel) -> Bi
                 .descendants_named("publisher")
                 .first()
                 .and_then(|publisher| non_empty_text(publisher))
+        })
+        .map(|name| DraftOrganization {
+            id: String::new(),
+            name,
+            ror_id: None,
         });
-    let journal = header
+    let journal_name = header
         .descendants_named("title")
         .into_iter()
         .find(|title| title.attr("level") == Some("j") && title.attr("type") != Some("abbr"))
         .and_then(non_empty_text);
     let journal_abbreviation = find_typed_title(header, "abbr", "j");
+    let journal = journal_name.map(|name| DraftPublicationVenue {
+        id: String::new(),
+        name,
+        abbreviation: journal_abbreviation.clone(),
+        issn: identifiers
+            .iter()
+            .find(|identifier| matches!(identifier.kind, IdentifierKind::Issn))
+            .map(|identifier| identifier.value.clone()),
+    });
     let abstract_text = header
         .descendants_named("abstract")
         .first()
@@ -70,6 +85,7 @@ pub(super) fn parse_bibliography(header: &XmlElement, level: PassageLevel) -> Bi
         publisher,
         journal,
         journal_abbreviation,
+        publication_event_id: None,
         abstract_text,
     }
 }
