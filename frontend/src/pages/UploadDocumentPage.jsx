@@ -35,14 +35,24 @@ export default function UploadDocumentPage() {
       headers: { "Content-Type": "application/pdf" },
       body: file,
     })
-      .then((response) => {
-        if (!response.ok) {
-          return response.json().then((data) => {
-            throw Error(data.error);
-          });
-        }
-        return response.json();
-      })
+      .then((response) =>
+        response.text().then((text) => {
+          let data;
+          try {
+            data = text ? JSON.parse(text) : null;
+          } catch {
+            throw Error("Invallid data structure");
+          }
+
+          if (!response.ok) {
+            throw Error(data?.error ?? "Failed to upload document");
+          }
+          if (!data) {
+            throw Error("Server returned an empty response");
+          }
+          return data;
+        }),
+      )
       .then((data) => {
         const pdf_hash = data.result.stored_pdf.pdf_hash;
 
