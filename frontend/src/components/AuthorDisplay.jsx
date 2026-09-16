@@ -60,7 +60,7 @@ export default function AuthorDisplay({ author, onChange, onDelete }) {
             {author.forename} {author.surname}
           </p>
           <p className="text-xs text-muted-foreground truncate">
-            {stripAffiliationNumber(author.affiliation)}
+            {stripAffiliationNumber(author.affiliation?.organization?.name)}
           </p>
         </div>
         <button
@@ -81,7 +81,9 @@ export default function AuthorDisplay({ author, onChange, onDelete }) {
               field.type === "select"
                 ? (author[field.key] ?? field.options[0].value)
                 : field.key === "affiliation"
-                  ? (stripAffiliationNumber(author.affiliation) ?? "")
+                  ? (stripAffiliationNumber(
+                      author.affiliation?.organization?.name,
+                    ) ?? "")
                   : (author[field.key] ?? "");
 
             return (
