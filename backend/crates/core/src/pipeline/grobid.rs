@@ -10,15 +10,7 @@ use crate::pipeline::{
     ValidationReport,
 };
 
-const TEI_COORDINATE_ELEMENTS: &[&str] = &[
-    "p",
-    "s",
-    "figure",
-    "ref",
-    "biblStruct",
-    "formula",
-    "persName",
-];
+const TEI_COORDINATE_ELEMENTS: &[&str] = &["p", "s", "figure", "formula", "persName"];
 
 const TERMINAL_GROBID_ERROR_CODES: &[&str] = &["NO_BLOCKS", "BAD_INPUT_DATA"];
 

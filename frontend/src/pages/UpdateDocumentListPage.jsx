@@ -1,12 +1,12 @@
 import { SavePlus } from "lucide-react";
 import CustomTable from "../components/CustomTable";
-import { useEffect, useState } from "react";
+import react, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast, ToastContainer } from "react-toastify";
 
 export default function UpdateDocumentList({}) {
   const tableHeaders = ["Title", "Stable identifiers", "Published"];
   const [documents, setDocuments] = useState(null);
-  const [error, setError] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -18,7 +18,7 @@ export default function UpdateDocumentList({}) {
         return res.json();
       })
       .then(setDocuments)
-      .catch((err) => setError(err.message));
+      .catch((err) => toast.error(err.message));
   }, []);
 
   function tableOnClickHandler(pdf_hash) {
@@ -41,20 +41,20 @@ export default function UpdateDocumentList({}) {
         canonical graph are shown here.
       </p>
       <div className="mt-4 w-full flex-1 min-h-0 max-h-96 overflow-auto">
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        {!error && documents && documents.length > 0 && (
+        {documents && documents.length > 0 && (
           <CustomTable
             headers={tableHeaders}
             documents={documents}
             onClickHandler={tableOnClickHandler}
           />
         )}
-        {!error && documents && documents.length === 0 && (
+        {documents && documents.length === 0 && (
           <p className="text-lg text-primary justify-center flex">
             No uploaded documents found
           </p>
         )}
       </div>
+      <ToastContainer />
     </div>
   );
 }

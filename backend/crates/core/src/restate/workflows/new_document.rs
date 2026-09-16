@@ -1,4 +1,4 @@
-use restate_sdk::prelude::{ContextClient, HandlerResult, Json, WorkflowContext};
+use restate_sdk::prelude::{ContextClient, HandlerResult, Json, TerminalError, WorkflowContext};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -64,6 +64,7 @@ impl NewDocumentWorkflow {
             .await?
             .into_inner();
         let draft = DraftDocument::new(extracted.output);
+        draft.validate_ids().map_err(TerminalError::new)?;
         let effective_document = draft.effective_document();
         let canonical = ctx
             .service_client::<TypeDbRestateServiceClient>()

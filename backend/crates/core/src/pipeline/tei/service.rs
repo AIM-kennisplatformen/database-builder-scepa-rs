@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::parser;
-use crate::models::draft::{Passage, TeiDocument};
+use crate::models::draft::TeiDocument;
 use crate::pipeline::{PipelineService, ReviewArtifact, ReviewStore, ValidationReport};
 
 /// Non-fatal quality findings produced by the TEI conversion stage.
@@ -77,28 +77,6 @@ where
         &self,
         document: &Self::Output,
     ) -> eros::Result<ValidationReport<Self::Warning>> {
-        for passage in document
-            .body_text
-            .iter()
-            .filter_map(|passage| match passage {
-                Passage::Text(passage) => Some(passage),
-                Passage::Formula(_) => None,
-            })
-            .chain(document.bibliography.abstract_text.iter())
-        {
-            for reference in &passage.references {
-                if passage.text.get(reference.byte_start..reference.byte_end)
-                    != Some(reference.text.as_str())
-                {
-                    eros::bail!(
-                        "reference offsets are invalid in passage {} for target {}",
-                        passage.id,
-                        reference.target.as_deref().unwrap_or("<unknown>")
-                    )
-                }
-            }
-        }
-
         let mut warnings = Vec::new();
         if document.bibliography.title.is_none() {
             warnings.push(TeiValidationWarning::MissingTitle);
