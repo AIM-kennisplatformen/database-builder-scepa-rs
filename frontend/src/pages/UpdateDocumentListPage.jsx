@@ -13,9 +13,12 @@ export default function UpdateDocumentList({}) {
     loadDocuments();
   }, []);
 
-  function tableOnClickHandler(pdf_hash) {
-    if (pdf_hash) {
-      navigate(`/update/${pdf_hash}`);
+  function tableOnClickHandler(document) {
+    // Fixing documents are addressed by review case id, normal ones by pdf_hash.
+    if (document.requiresFixing) {
+      navigate(`/update/${document.id}?requiresFixing=true`);
+    } else if (document.pdf_hash) {
+      navigate(`/update/${document.pdf_hash}`);
     }
   }
 

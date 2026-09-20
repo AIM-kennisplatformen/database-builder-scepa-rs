@@ -51,9 +51,7 @@ export default function CustomTable({
               <td className="px-3 py-2 ">
                 <button
                   className="bg-accent! border-primary! hover:bg-gray-200!"
-                  onClick={() =>
-                    onClickHandler(document.pdf_hash, setCurrentFile)
-                  }
+                  onClick={() => onClickHandler(document, setCurrentFile)}
                 >
                   <ChevronRight className="text-primary size-4" />
                 </button>

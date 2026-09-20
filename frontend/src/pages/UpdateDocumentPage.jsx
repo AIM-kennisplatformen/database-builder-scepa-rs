@@ -3,7 +3,7 @@ import AuthorDisplay from "../components/AuthorDisplay";
 import PdfViewer from "../components/PdfViewer";
 import UpdateDocumentList from "./UpdateDocumentListPage";
 import { useState, useEffect, useRef } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { TEXT_REGEX, isValidField } from "../utils/validation";
 import { Plus } from "lucide-react";
 import { AUTHOR_FIELDS } from "../components/AuthorDisplay";
@@ -249,6 +249,8 @@ function sanitizeContributor(author) {
 
 export default function UpdateDocumentPage({}) {
   const { pdf_hash } = useParams();
+  const [searchParams] = useSearchParams();
+  const requiresFixing = searchParams.get("requiresFixing") === "true";
   const [documentData, setDocumentData] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isBibliographyOpen, setIsBibliographyOpen] = useState(true);
@@ -270,49 +272,77 @@ export default function UpdateDocumentPage({}) {
 
   const bibliography =
     documentData?.artifact?.grobid_extraction_data?.bibliography;
+  // For fixing documents the route param is the review case id, so the real
+  // hash comes from the response.
+  const pdfHash = requiresFixing ? documentData?.pdfHash : pdf_hash;
 
   useEffect(() => {
-    if (pdf_hash) {
-      fetch(`/api/documents/${pdf_hash}`)
-        .then((res) => {
-          if (!res.ok) {
-            throw new Error("Failed to load documents");
-          }
-          return res.json();
-        })
-        .then((res) => {
-          setDocumentData(res);
-
-          const bibliography = effectiveBibliography(res?.artifact);
-
-          if (bibliography) {
-            setBibliographyFieldsData({
-              title: bibliography.title,
-              publication_date: bibliography.publication_date,
-              publication_year: bibliography.publication_year,
-              journal: bibliography.journal,
-              journal_abbreviation: bibliography.journal_abbreviation,
-              publisher: bibliography.publisher,
-              publication_event_id: bibliography.publication_event_id,
-            });
-
-            setContributorsFieldsData(
-              bibliography.authors.map((author) => ({
-                _key: author.id || crypto.randomUUID(),
-                id: author.id ?? "",
-                contribution_id: author.contribution_id ?? "",
-                name: author.name,
-                forename: author.forename,
-                surname: author.surname,
-                affiliation: author.affiliation ?? null,
-                role: author.role,
-              })),
-            );
-          }
-        })
-        .catch((err) => toast.error(err.message));
+    if (!pdf_hash) return;
+    if (requiresFixing) {
+      loadFixingDocument();
+    } else {
+      loadNormalDocument();
     }
-  }, [pdf_hash]);
+  }, [pdf_hash, requiresFixing]);
+
+  async function fetchJson(url) {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error("Failed to load documents");
+    }
+    return res.json();
+  }
+
+  // GET /documents/{pdf_hash} -> { artifact: <draft fields> }
+  function loadNormalDocument() {
+    fetchJson(`/api/documents/${pdf_hash}`)
+      .then((res) =>
+        applyDocument({ artifact: res.artifact, pdfHash: pdf_hash }),
+      )
+      .catch((err) => toast.error(err.message));
+  }
+
+  // GET /documents/requiring-fixing/{case_id} -> { case, draft: { pdf_hash, ...draft fields } }
+  function loadFixingDocument() {
+    fetchJson(`/api/documents/requiring-fixing/${pdf_hash}`)
+      .then((res) =>
+        applyDocument({ artifact: res.draft, pdfHash: res.draft.pdf_hash }),
+      )
+      .catch((err) => toast.error(err.message));
+  }
+
+  // Both endpoints are normalized to { artifact, pdfHash } before this point,
+  // so everything below is shared.
+  function applyDocument(document) {
+    setDocumentData(document);
+
+    const bibliography = effectiveBibliography(document.artifact);
+
+    if (bibliography) {
+      setBibliographyFieldsData({
+        title: bibliography.title,
+        publication_date: bibliography.publication_date,
+        publication_year: bibliography.publication_year,
+        journal: bibliography.journal,
+        journal_abbreviation: bibliography.journal_abbreviation,
+        publisher: bibliography.publisher,
+        publication_event_id: bibliography.publication_event_id,
+      });
+
+      setContributorsFieldsData(
+        bibliography.authors.map((author) => ({
+          _key: author.id || crypto.randomUUID(),
+          id: author.id ?? "",
+          contribution_id: author.contribution_id ?? "",
+          name: author.name,
+          forename: author.forename,
+          surname: author.surname,
+          affiliation: author.affiliation ?? null,
+          role: author.role,
+        })),
+      );
+    }
+  }
 
   // Sends the idempotency key from the previous attempt when retrying the
   // same unchanged payload, and mints a fresh one whenever the payload changes.
@@ -407,7 +437,7 @@ export default function UpdateDocumentPage({}) {
   return (
     <div className="flex h-screen w-full py-6 mt-1">
       <div className="w-2/3 h-full overflow-y-auto border-r border-border">
-        <PdfViewer file={`/api/pdfs/${pdf_hash}`} />
+        {pdfHash && <PdfViewer file={`/api/pdfs/${pdfHash}`} />}
       </div>
       <div className="w-1/3 h-full overflow-y-auto bg-white p-2 text-black">
         {/* {error && <p className="text-destructive">{error}</p>} */}
