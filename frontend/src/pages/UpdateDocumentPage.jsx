@@ -393,7 +393,10 @@ export default function UpdateDocumentPage({}) {
         return response.json();
       })
       .then(() => {
-        toast(<CustomSuccessToast />, { autoClose: 7000 });
+        toast(<CustomSuccessToast />, {
+          autoClose: 7000,
+          progressClassName: "!bg-primary !bg-none",
+        });
       })
       .catch((err) => {
         toast.error(err.message);
