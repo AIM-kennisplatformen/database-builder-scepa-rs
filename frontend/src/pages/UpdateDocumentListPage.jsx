@@ -5,25 +5,39 @@ import { useNavigate } from "react-router-dom";
 import { toast, ToastContainer } from "react-toastify";
 
 export default function UpdateDocumentList({}) {
-  const tableHeaders = ["Title", "Published"];
+  const tableHeaders = ["Title", "Published", "Status"];
   const [documents, setDocuments] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
-    fetch("/api/documents")
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`Failed to load documents`);
-        }
-        return res.json();
-      })
-      .then(setDocuments)
-      .catch((err) => toast.error(err.message));
+    loadDocuments();
   }, []);
 
   function tableOnClickHandler(pdf_hash) {
     if (pdf_hash) {
       navigate(`/update/${pdf_hash}`);
+    }
+  }
+
+  async function fetchDocument(url) {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Failed to load documents`);
+    }
+    return res.json();
+  }
+
+  async function loadDocuments() {
+    try {
+      const normal = await fetchDocument("/api/documents");
+      const failed = await fetchDocument("/api/documents/requiring-fixing");
+
+      setDocuments([
+        ...failed.map((doc) => ({ ...doc, requiresFixing: true })),
+        ...normal.map((doc) => ({ ...doc, requiresFixing: false })),
+      ]);
+    } catch (err) {
+      toast.error(err.message);
     }
   }
 

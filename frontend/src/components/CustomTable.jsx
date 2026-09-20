@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, TriangleAlert } from "lucide-react";
 
 export default function CustomTable({
   headers,
@@ -27,8 +27,25 @@ export default function CustomTable({
               key={index}
               className="border-b border-border last:border-0 hover:bg-muted/50"
             >
-              <td className="px-3 py-2 font-medium">{document.title}</td>
-              <td className="px-3 py-2 ">{document.published_at?.split(/[ T]/)[0]}</td>
+              <td className="px-3 py-2 font-medium">
+                {document.title ? document.title : "[Missing title]"}
+              </td>
+              <td className="px-3 py-2 ">
+                {document.published_at?.split(/[ T]/)[0]}
+              </td>
+              <td className="px-3 py-2 ">
+                {document.requiresFixing ? (
+                  <div className="flex flex-row">
+                    <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">
+                      Requires fixing
+                    </span>
+                  </div>
+                ) : (
+                  <span className="rounded bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
+                    Published
+                  </span>
+                )}
+              </td>
               <td className="px-3 py-2 ">
                 <button
                   className="bg-accent! border-primary! hover:bg-gray-200!"
