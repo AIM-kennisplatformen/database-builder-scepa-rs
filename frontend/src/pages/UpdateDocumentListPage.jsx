@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { toast, ToastContainer } from "react-toastify";
 
 export default function UpdateDocumentList({}) {
-  const tableHeaders = ["Title", "Stable identifiers", "Published"];
+  const tableHeaders = ["Title", "Published"];
   const [documents, setDocuments] = useState(null);
   const navigate = useNavigate();
 
