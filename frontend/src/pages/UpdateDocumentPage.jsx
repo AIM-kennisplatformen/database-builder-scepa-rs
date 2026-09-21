@@ -178,6 +178,7 @@ function createBlankContributor() {
     surname: null,
     affiliation: null,
     role: null,
+    isOpen: true,
   };
 }
 
@@ -339,6 +340,7 @@ export default function UpdateDocumentPage({}) {
           surname: author.surname,
           affiliation: author.affiliation ?? null,
           role: author.role,
+          isOpen: false,
         })),
       );
     }
