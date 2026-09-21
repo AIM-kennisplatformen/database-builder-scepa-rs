@@ -35,7 +35,7 @@ function stripAffiliationNumber(affiliation) {
 }
 
 export default function AuthorDisplay({ author, onChange, onDelete }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(author.isOpen);
   const [fieldErrors, setFieldErrors] = useState({});
 
   function handleChange(field, regex, value) {
