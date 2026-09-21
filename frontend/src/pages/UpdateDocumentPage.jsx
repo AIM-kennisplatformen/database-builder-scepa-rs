@@ -348,14 +348,24 @@ export default function UpdateDocumentPage({}) {
 
   // Sends the idempotency key from the previous attempt when retrying the
   // same unchanged payload, and mints a fresh one whenever the payload changes.
+  // PUT /documents/{pdf_hash} takes the ManualDocument directly, while
+  // PUT /documents/requiring-fixing/{case_id} wraps it as { manual_data, enrich }.
+  // For fixing documents the route param is the case id.
   function saveDocument(manualDocument) {
-    const body = JSON.stringify(manualDocument);
+    const url = requiresFixing
+      ? `/api/documents/requiring-fixing/${pdf_hash}`
+      : `/api/documents/${pdf_hash}`;
+    const body = JSON.stringify(
+      requiresFixing
+        ? { manual_data: manualDocument, enrich: false }
+        : manualDocument,
+    );
 
     if (!pendingSaveRef.current || pendingSaveRef.current.body !== body) {
       pendingSaveRef.current = { body, key: crypto.randomUUID() };
     }
 
-    return fetch(`/api/documents/${pdf_hash}`, {
+    return fetch(url, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
