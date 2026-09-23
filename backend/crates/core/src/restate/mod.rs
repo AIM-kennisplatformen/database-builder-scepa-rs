@@ -4,7 +4,7 @@ pub mod client;
 pub mod services;
 pub mod workflows;
 
-pub use client::{NewDocumentWorkflowHandle, RestateClient};
+pub use client::{NewDocumentWorkflowHandle, RestateClient, RestateError, RestateErrorKind};
 
 pub use services::{
     ArtifactRestateService, GarageRestateService, GrobidRestateService, TeiRestateService,

@@ -15,7 +15,7 @@ const TEI_COORDINATE_ELEMENTS: &[&str] = &["p", "s", "figure", "formula", "persN
 const TERMINAL_GROBID_ERROR_CODES: &[&str] = &["NO_BLOCKS", "BAD_INPUT_DATA"];
 
 #[derive(Debug, ThisError)]
-enum GrobidRequestError {
+pub(crate) enum GrobidRequestError {
     #[error(transparent)]
     Transport(#[from] reqwest::Error),
 
@@ -24,6 +24,25 @@ enum GrobidRequestError {
         status: reqwest::StatusCode,
         body: String,
     },
+}
+
+impl GrobidRequestError {
+    pub(crate) fn is_document_rejection(&self) -> bool {
+        match self {
+            Self::Response { status, body } => {
+                matches!(
+                    *status,
+                    reqwest::StatusCode::BAD_REQUEST
+                        | reqwest::StatusCode::PAYLOAD_TOO_LARGE
+                        | reqwest::StatusCode::UNSUPPORTED_MEDIA_TYPE
+                        | reqwest::StatusCode::UNPROCESSABLE_ENTITY
+                ) || TERMINAL_GROBID_ERROR_CODES
+                    .iter()
+                    .any(|code| body.contains(code))
+            }
+            Self::Transport(_) => false,
+        }
+    }
 }
 
 /// Boundary around Grobid's HTTP API.

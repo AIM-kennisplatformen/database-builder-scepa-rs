@@ -122,7 +122,12 @@ workflow/PDF mismatches, duplicate records, canonical key/uniqueness conflicts,
 and duplicate passage identities. These are terminal workflow failures, not
 transient errors to retry. Synchronous uploads whose extracted drafts are missing
 canonical fields return `422` with the pending review-case ID and all missing
-field paths. Other upstream failures continue to return `502`.
+field paths. Error bodies also include an actionable `action` and, when available,
+the workflow, PDF, and review-case identifiers. Invalid document data returns
+`422`, missing artifacts return `404`, dependency outages and timeouts return
+`503`/`504`, and internal processing failures return `500`. A `502` is reserved
+for malformed or otherwise unclassifiable upstream responses. Raw upstream and
+storage errors are logged but are not returned to clients.
 An accepted asynchronous submission can still fail later; its `202` response
 only confirms acceptance, not successful publication.
 

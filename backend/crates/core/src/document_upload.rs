@@ -1,7 +1,7 @@
 //! Transport-independent entry workflow for PDF uploads.
 
 use crate::pipeline::{PipelineService, garage::GaragePipelineService};
-use crate::restate::{RestateClient, workflows::NewDocumentWorkflowResponse};
+use crate::restate::{RestateClient, RestateError, workflows::NewDocumentWorkflowResponse};
 
 #[derive(Clone)]
 pub struct DocumentUpload {
@@ -18,7 +18,17 @@ pub struct ReviewedUpload {
 #[derive(Debug)]
 pub struct FailedUpload {
     pub workflow_id: String,
-    pub source: std::io::Error,
+    pub source: DocumentUploadError,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DocumentUploadError {
+    #[error("{0}")]
+    InvalidInput(String),
+    #[error("document storage failed: {0}")]
+    Storage(#[source] std::io::Error),
+    #[error(transparent)]
+    Workflow(#[from] RestateError),
 }
 
 impl DocumentUpload {
@@ -34,7 +44,7 @@ impl DocumentUpload {
             .await
             .map_err(|source| FailedUpload {
                 workflow_id: workflow_id.clone(),
-                source,
+                source: DocumentUploadError::Storage(source),
             })?;
         let result = self
             .restate
@@ -42,7 +52,7 @@ impl DocumentUpload {
             .await
             .map_err(|source| FailedUpload {
                 workflow_id: workflow_id.clone(),
-                source,
+                source: DocumentUploadError::Workflow(source),
             })?;
         Ok(ReviewedUpload {
             workflow_id,
@@ -51,17 +61,20 @@ impl DocumentUpload {
     }
 
     /// Stores and durably submits a PDF for automatic canonical publication.
-    pub async fn submit(&self, workflow_id: &str, pdf: Vec<u8>) -> std::io::Result<()> {
+    pub async fn submit(&self, workflow_id: &str, pdf: Vec<u8>) -> Result<(), DocumentUploadError> {
         if workflow_id.is_empty() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "workflow identifier must not be empty",
+            return Err(DocumentUploadError::InvalidInput(
+                "workflow identifier must not be empty".into(),
             ));
         }
-        let stored = self.store(workflow_id, &pdf).await?;
+        let stored = self
+            .store(workflow_id, &pdf)
+            .await
+            .map_err(DocumentUploadError::Storage)?;
         self.restate
             .submit_new_document(workflow_id, stored.pdf_hash)
-            .await?;
+            .await
+            .map_err(DocumentUploadError::Workflow)?;
         Ok(())
     }
 

@@ -24,6 +24,39 @@ pub struct NewDocumentWorkflowHandle {
     workflow_id: String,
 }
 
+/// A failure while invoking a workflow through Restate ingress.
+#[derive(Debug, thiserror::Error)]
+#[error("Restate workflow {workflow_id} failed: {detail}")]
+pub struct RestateError {
+    workflow_id: String,
+    kind: RestateErrorKind,
+    detail: String,
+}
+
+/// Stable failure categories exposed to HTTP adapters.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RestateErrorKind {
+    InvalidRequest,
+    Rejected(u16),
+    Unavailable,
+    Timeout,
+    InvalidResponse,
+}
+
+impl RestateError {
+    pub fn workflow_id(&self) -> &str {
+        &self.workflow_id
+    }
+
+    pub fn kind(&self) -> RestateErrorKind {
+        self.kind
+    }
+
+    pub fn rejection_message(&self) -> Option<&str> {
+        matches!(self.kind, RestateErrorKind::Rejected(_)).then_some(self.detail.as_str())
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SendResponse {
@@ -43,7 +76,7 @@ impl RestateClient {
         &self,
         workflow_id: &str,
         pdf_hash: String,
-    ) -> std::io::Result<NewDocumentWorkflowResponse> {
+    ) -> Result<NewDocumentWorkflowResponse, RestateError> {
         self.call_workflow(
             "NewDocumentWorkflow",
             workflow_id,
@@ -56,7 +89,7 @@ impl RestateClient {
         &self,
         workflow_id: &str,
         request: UpdateDocumentWorkflowRequest,
-    ) -> std::io::Result<UpdateDocumentWorkflowResponse> {
+    ) -> Result<UpdateDocumentWorkflowResponse, RestateError> {
         self.call_workflow("UpdateDocumentWorkflow", workflow_id, &request)
             .await
     }
@@ -65,7 +98,7 @@ impl RestateClient {
         &self,
         pdf_hash: String,
         manual_data: ManualDocument,
-    ) -> std::io::Result<UpdateDocumentWorkflowResponse> {
+    ) -> Result<UpdateDocumentWorkflowResponse, RestateError> {
         self.update_with_key("draft", pdf_hash, manual_data).await
     }
 
@@ -73,7 +106,7 @@ impl RestateClient {
         &self,
         pdf_hash: String,
         manual_data: ManualDocument,
-    ) -> std::io::Result<UpdateDocumentWorkflowResponse> {
+    ) -> Result<UpdateDocumentWorkflowResponse, RestateError> {
         self.update_with_key("update", pdf_hash, manual_data).await
     }
 
@@ -81,7 +114,7 @@ impl RestateClient {
         &self,
         workflow_id: &str,
         request: FixDocumentWorkflowRequest,
-    ) -> std::io::Result<FixDocumentWorkflowResponse> {
+    ) -> Result<FixDocumentWorkflowResponse, RestateError> {
         self.call_workflow("FixDocumentWorkflow", workflow_id, &request)
             .await
     }
@@ -89,7 +122,7 @@ impl RestateClient {
     pub async fn fix_document(
         &self,
         request: FixDocumentWorkflowRequest,
-    ) -> std::io::Result<FixDocumentWorkflowResponse> {
+    ) -> Result<FixDocumentWorkflowResponse, RestateError> {
         let invocation = uuid::Uuid::new_v4();
         self.run_fix_document(
             &format!("case:{}:fix:{invocation}", request.case_id),
@@ -103,21 +136,26 @@ impl RestateClient {
         &self,
         workflow_id: &str,
         pdf_hash: String,
-    ) -> std::io::Result<NewDocumentWorkflowHandle> {
-        let url = self.submit_url("NewDocumentWorkflow", workflow_id)?;
+    ) -> Result<NewDocumentWorkflowHandle, RestateError> {
+        let url = self
+            .submit_url("NewDocumentWorkflow", workflow_id)
+            .map_err(|error| invalid_request(workflow_id, error))?;
         let response = self
             .client
             .post(url)
             .json(&NewDocumentWorkflowRequest { pdf_hash })
             .send()
             .await
-            .map_err(connection_error)?;
+            .map_err(|error| connection_error(workflow_id, error))?;
 
         if !response.status().is_success() {
             return Err(response_error("NewDocumentWorkflow", workflow_id, response).await);
         }
 
-        let response: SendResponse = response.json().await.map_err(connection_error)?;
+        let response: SendResponse = response
+            .json()
+            .await
+            .map_err(|error| response_decode_error(workflow_id, error))?;
         Ok(NewDocumentWorkflowHandle {
             invocation_id: response.invocation_id,
             workflow_id: workflow_id.to_owned(),
@@ -128,19 +166,25 @@ impl RestateClient {
     pub async fn attach_new_document(
         &self,
         handle: &NewDocumentWorkflowHandle,
-    ) -> std::io::Result<NewDocumentWorkflowResponse> {
+    ) -> Result<NewDocumentWorkflowResponse, RestateError> {
         let response = self
             .client
-            .get(self.attach_url(&handle.invocation_id)?)
+            .get(
+                self.attach_url(&handle.invocation_id)
+                    .map_err(|error| invalid_request(&handle.workflow_id, error))?,
+            )
             .send()
             .await
-            .map_err(connection_error)?;
+            .map_err(|error| connection_error(&handle.workflow_id, error))?;
 
         if !response.status().is_success() {
             return Err(response_error("NewDocumentWorkflow", &handle.workflow_id, response).await);
         }
 
-        response.json().await.map_err(connection_error)
+        response
+            .json()
+            .await
+            .map_err(|error| response_decode_error(&handle.workflow_id, error))
     }
 
     async fn call_workflow<I, O>(
@@ -148,24 +192,30 @@ impl RestateClient {
         workflow: &str,
         workflow_id: &str,
         request: &I,
-    ) -> std::io::Result<O>
+    ) -> Result<O, RestateError>
     where
         I: Serialize + ?Sized,
         O: DeserializeOwned,
     {
         let response = self
             .client
-            .post(self.workflow_url(workflow, workflow_id)?)
+            .post(
+                self.workflow_url(workflow, workflow_id)
+                    .map_err(|error| invalid_request(workflow_id, error))?,
+            )
             .json(request)
             .send()
             .await
-            .map_err(connection_error)?;
+            .map_err(|error| connection_error(workflow_id, error))?;
 
         if !response.status().is_success() {
             return Err(response_error(workflow, workflow_id, response).await);
         }
 
-        response.json().await.map_err(connection_error)
+        response
+            .json()
+            .await
+            .map_err(|error| response_decode_error(workflow_id, error))
     }
 
     async fn update_with_key(
@@ -173,7 +223,7 @@ impl RestateClient {
         operation: &str,
         pdf_hash: String,
         manual_data: ManualDocument,
-    ) -> std::io::Result<UpdateDocumentWorkflowResponse> {
+    ) -> Result<UpdateDocumentWorkflowResponse, RestateError> {
         let workflow_id = format!("{pdf_hash}:{operation}:{}", uuid::Uuid::new_v4());
         self.run_update_document(
             &workflow_id,
@@ -244,7 +294,7 @@ async fn response_error(
     workflow: &str,
     workflow_id: &str,
     response: reqwest::Response,
-) -> std::io::Error {
+) -> RestateError {
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     workflow_response_error(workflow, workflow_id, status, &body)
@@ -255,7 +305,7 @@ fn workflow_response_error(
     workflow_id: &str,
     status: reqwest::StatusCode,
     body: &str,
-) -> std::io::Error {
+) -> RestateError {
     let payload = serde_json::from_str::<serde_json::Value>(body).ok();
     if status == reqwest::StatusCode::CONFLICT
         || payload
@@ -271,19 +321,63 @@ fn workflow_response_error(
             .and_then(crate::conflict::Conflict::from_message)
             .unwrap_or(crate::conflict::Conflict::Submission);
         tracing::warn!(%workflow, %workflow_id, %status, "Restate workflow conflict");
-        return conflict.into_io();
+        return RestateError {
+            workflow_id: workflow_id.to_owned(),
+            kind: RestateErrorKind::Rejected(409),
+            detail: conflict.to_string(),
+        };
     }
-    std::io::Error::other(format!(
-        "{workflow} {workflow_id} failed through Restate with {status}: {body}"
-    ))
+    let code = payload
+        .as_ref()
+        .and_then(|value| value.get("code"))
+        .and_then(|code| code.as_u64())
+        .and_then(|code| u16::try_from(code).ok())
+        .filter(|code| (400..=599).contains(code))
+        .unwrap_or(status.as_u16());
+    let message = payload
+        .as_ref()
+        .and_then(|value| value.get("message"))
+        .and_then(|message| message.as_str())
+        .unwrap_or("Restate returned an unrecognized error response");
+    tracing::error!(%workflow, %workflow_id, %status, response_body = %body, "Restate workflow failed");
+    RestateError {
+        workflow_id: workflow_id.to_owned(),
+        kind: RestateErrorKind::Rejected(code),
+        detail: message.to_owned(),
+    }
 }
 
 fn invalid_input(error: impl std::fmt::Display) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidInput, error.to_string())
 }
 
-fn connection_error(error: reqwest::Error) -> std::io::Error {
-    std::io::Error::other(error)
+fn invalid_request(workflow_id: &str, error: std::io::Error) -> RestateError {
+    RestateError {
+        workflow_id: workflow_id.to_owned(),
+        kind: RestateErrorKind::InvalidRequest,
+        detail: error.to_string(),
+    }
+}
+
+fn connection_error(workflow_id: &str, error: reqwest::Error) -> RestateError {
+    let kind = if error.is_timeout() {
+        RestateErrorKind::Timeout
+    } else {
+        RestateErrorKind::Unavailable
+    };
+    RestateError {
+        workflow_id: workflow_id.to_owned(),
+        kind,
+        detail: error.to_string(),
+    }
+}
+
+fn response_decode_error(workflow_id: &str, error: reqwest::Error) -> RestateError {
+    RestateError {
+        workflow_id: workflow_id.to_owned(),
+        kind: RestateErrorKind::InvalidResponse,
+        detail: error.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -374,12 +468,10 @@ mod tests {
             let body = serde_json::json!({"code":409,"message":conflict.to_string()}).to_string();
             let error =
                 workflow_response_error("workflow", "key", reqwest::StatusCode::CONFLICT, &body);
+            assert_eq!(error.kind(), RestateErrorKind::Rejected(409));
             assert_eq!(
-                error
-                    .get_ref()
-                    .unwrap()
-                    .downcast_ref::<crate::conflict::Conflict>(),
-                Some(&conflict)
+                error.rejection_message(),
+                Some(conflict.to_string().as_str())
             );
         }
         let error = workflow_response_error(
@@ -388,7 +480,11 @@ mod tests {
             reqwest::StatusCode::CONFLICT,
             "secret internal details",
         );
-        assert_eq!(error.to_string(), "Workflow has already been submitted");
+        assert_eq!(error.kind(), RestateErrorKind::Rejected(409));
+        assert_eq!(
+            error.rejection_message(),
+            Some("Workflow has already been submitted")
+        );
         assert_eq!(
             workflow_response_error(
                 "workflow",
@@ -397,7 +493,23 @@ mod tests {
                 "offline"
             )
             .kind(),
-            std::io::ErrorKind::Other
+            RestateErrorKind::Rejected(502)
+        );
+    }
+
+    #[test]
+    fn terminal_status_and_message_are_retained_for_safe_classification() {
+        let error = workflow_response_error(
+            "workflow",
+            "upload:1",
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            r#"{"code":422,"message":"The extracted document could not be parsed"}"#,
+        );
+        assert_eq!(error.workflow_id(), "upload:1");
+        assert_eq!(error.kind(), RestateErrorKind::Rejected(422));
+        assert_eq!(
+            error.rejection_message(),
+            Some("The extracted document could not be parsed")
         );
     }
 

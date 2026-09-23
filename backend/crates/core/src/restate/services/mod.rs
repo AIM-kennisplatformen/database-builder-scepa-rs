@@ -67,10 +67,10 @@ where
     pipeline
         .execute(&request.workflow_id, &request.input)
         .await
-        .map_err(to_handler_error)
+        .map_err(|error| to_handler_error(P::NAME, error))
 }
 
-fn to_handler_error(error: PipelineExecutionError) -> HandlerError {
+fn to_handler_error(service: &str, error: PipelineExecutionError) -> HandlerError {
     let disposition = error.disposition();
     let source = error.into_source();
     if let Some(conflict) = crate::conflict::classify(&source) {
@@ -80,7 +80,28 @@ fn to_handler_error(error: PipelineExecutionError) -> HandlerError {
         FailureDisposition::Retryable => {
             HandlerError::from(std::io::Error::other(source.to_string()))
         }
-        FailureDisposition::Terminal => TerminalError::new(source.to_string()).into(),
+        FailureDisposition::Terminal => match service {
+            "grobid-extraction"
+                if source
+                    .downcast_inner_ref::<crate::pipeline::grobid::GrobidRequestError>()
+                    .is_none_or(|error| error.is_document_rejection()) =>
+            {
+                TerminalError::new_with_code(
+                    422,
+                    "The PDF could not be converted into a readable document",
+                )
+                .into()
+            }
+            "grobid-extraction" => {
+                tracing::error!(error = %source, "terminal Grobid service failure");
+                TerminalError::new_with_code(500, "Document extraction failed").into()
+            }
+            "tei-conversion" => {
+                TerminalError::new_with_code(422, "The extracted document could not be parsed")
+                    .into()
+            }
+            _ => TerminalError::new_with_code(500, "Document processing failed").into(),
+        },
     }
 }
 

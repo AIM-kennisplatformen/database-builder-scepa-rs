@@ -71,9 +71,14 @@ impl NewDocumentWorkflow {
             .await?
             .into_inner()
             .ok_or_else(|| {
-                restate_sdk::prelude::TerminalError::new("document artifact was not found")
+                restate_sdk::prelude::TerminalError::new_with_code(
+                    404,
+                    "The extracted document artifact could not be found",
+                )
             })?;
-        draft.validate_ids().map_err(TerminalError::new)?;
+        draft
+            .validate_ids()
+            .map_err(|_| TerminalError::new_with_code(422, "Document identities are invalid"))?;
         let old = ctx
             .service_client::<ArtifactRestateServiceClient>()
             .get_published(Json(stored.pdf_hash.clone()))

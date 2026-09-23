@@ -10,7 +10,7 @@ use axum::{
     routing::{get, post},
 };
 use scepa::{
-    document_upload::DocumentUpload,
+    document_upload::{DocumentUpload, DocumentUploadError},
     models::{
         canonical::{CanonicalMissingField, CanonicalModel, canonical_missing_fields},
         draft::{DraftDocument, ManualDocument},
@@ -18,7 +18,7 @@ use scepa::{
     pipeline::garage::GaragePipelineService,
     postgres::{PostgresReviewStore, PublishedDocument, PublishedDocumentSummary},
     restate::{
-        RestateClient,
+        RestateClient, RestateError, RestateErrorKind,
         services::RepairDraft,
         workflows::{
             FixDocumentWorkflowRequest, NewDocumentWorkflowResponse, UpdateDocumentWorkflowResponse,
@@ -93,14 +93,22 @@ struct RepairDocumentRequest {
     enrich: bool,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Debug, Serialize, ToSchema)]
 struct ErrorResponse {
     error: String,
+    action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workflow_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pdf_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    review_case_id: Option<i64>,
 }
 
 #[derive(Serialize, ToSchema)]
 struct DocumentValidationErrorResponse {
     error: String,
+    action: String,
     code: String,
     workflow_id: String,
     pdf_hash: String,
@@ -108,8 +116,28 @@ struct DocumentValidationErrorResponse {
     missing_fields: Vec<CanonicalMissingField>,
 }
 
+#[allow(dead_code)]
+#[derive(ToSchema)]
+#[serde(untagged)]
+enum UploadErrorResponse {
+    General(ErrorResponse),
+    Validation(DocumentValidationErrorResponse),
+}
+
 #[derive(Debug)]
-struct ApiError(StatusCode, String);
+struct ApiError(StatusCode, ErrorResponse);
+
+impl ApiError {
+    fn with_pdf_hash(mut self, pdf_hash: String) -> Self {
+        self.1.pdf_hash = Some(pdf_hash);
+        self
+    }
+
+    fn with_review_case_id(mut self, review_case_id: i64) -> Self {
+        self.1.review_case_id = Some(review_case_id);
+        self
+    }
+}
 
 #[derive(Clone, Copy)]
 struct StructuredApiError;
@@ -142,7 +170,7 @@ struct ApiDoc;
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let mut response = (self.0, Json(ErrorResponse { error: self.1 })).into_response();
+        let mut response = (self.0, Json(self.1)).into_response();
         response.extensions_mut().insert(StructuredApiError);
         response
     }
@@ -188,18 +216,49 @@ fn normalize_framework_error(mut response: Response) -> Response {
         return response;
     }
 
-    let message = match status {
-        StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY => "Invalid request",
-        StatusCode::NOT_FOUND => "Resource not found",
-        StatusCode::METHOD_NOT_ALLOWED => "Method not allowed",
-        StatusCode::PAYLOAD_TOO_LARGE => "Request body too large",
-        StatusCode::UNSUPPORTED_MEDIA_TYPE => "Unsupported media type",
-        StatusCode::BAD_GATEWAY => "Upstream service unavailable",
-        status if status.is_client_error() => "Request failed",
-        _ => "Internal server error",
+    let (message, action) = match status {
+        StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY => {
+            ("Invalid request", "Correct the request data and try again")
+        }
+        StatusCode::NOT_FOUND => ("Resource not found", "Refresh the page and try again"),
+        StatusCode::METHOD_NOT_ALLOWED => (
+            "Method not allowed",
+            "Use one of the methods allowed by this endpoint",
+        ),
+        StatusCode::PAYLOAD_TOO_LARGE => (
+            "Request body too large",
+            "Submit a file smaller than 64 MiB",
+        ),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE => (
+            "Unsupported media type",
+            "Submit the request using the documented content type",
+        ),
+        StatusCode::BAD_GATEWAY => (
+            "An upstream service returned an invalid response",
+            "Try again; if the problem continues, contact support",
+        ),
+        StatusCode::SERVICE_UNAVAILABLE => (
+            "A required service is temporarily unavailable",
+            "Wait a moment and try again",
+        ),
+        StatusCode::GATEWAY_TIMEOUT => (
+            "A required service timed out",
+            "Try again; if the problem continues, contact support",
+        ),
+        status if status.is_client_error() => {
+            ("Request failed", "Correct the request and try again")
+        }
+        _ => (
+            "Internal server error",
+            "Try again; if the problem continues, contact support",
+        ),
     };
     let json_response = Json(ErrorResponse {
         error: message.into(),
+        action: action.into(),
+        workflow_id: None,
+        pdf_hash: None,
+        review_case_id: None,
     })
     .into_response();
 
@@ -237,7 +296,14 @@ async fn download_pdf(
         .load(&pdf_hash)
         .await
         .map_err(internal)?
-        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "PDF not found".into()))?;
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::NOT_FOUND,
+                "PDF not found",
+                "Upload the PDF again or verify its hash",
+            )
+            .with_pdf_hash(pdf_hash.clone())
+        })?;
     let content_type = HeaderValue::from_str(&metadata.content_type).map_err(internal)?;
     let content_disposition =
         HeaderValue::from_str(&format!("inline; filename=\"{}.pdf\"", metadata.pdf_hash))
@@ -266,9 +332,13 @@ async fn download_pdf(
     responses(
         (status = 201, description = "Document processed", body = UploadResponse),
         (status = 413, description = "PDF exceeds the upload limit", body = ErrorResponse),
-        (status = 422, description = "Extracted document requires correction", body = DocumentValidationErrorResponse),
+        (status = 422, description = "PDF or extracted document requires correction", body = UploadErrorResponse),
         (status = 409, description = "Conflicting data or workflow identity", body = ErrorResponse),
-        (status = 502, description = "Pipeline or workflow error", body = ErrorResponse)
+        (status = 404, description = "Stored workflow artifact not found", body = ErrorResponse),
+        (status = 500, description = "Document processing failed", body = ErrorResponse),
+        (status = 502, description = "Invalid upstream response", body = ErrorResponse),
+        (status = 503, description = "Document processing unavailable", body = ErrorResponse),
+        (status = 504, description = "Document processing timed out", body = ErrorResponse)
     ),
     tag = "documents"
 )]
@@ -284,7 +354,9 @@ async fn upload_pdf(State(state): State<AppState>, pdf: Bytes) -> Result<Respons
                 response.extensions_mut().insert(StructuredApiError);
                 return Ok(response);
             }
-            return Err(upstream(failure.source));
+            return Err(
+                document_upload_error(&state, &failure.workflow_id, failure.source, None).await,
+            );
         }
     };
 
@@ -340,6 +412,7 @@ fn document_validation_response(
 
     Some(DocumentValidationErrorResponse {
         error: "Document requires correction".into(),
+        action: "Open the review case and supply the missing document fields".into(),
         code: "document_validation_failed".into(),
         workflow_id: workflow_id.into(),
         pdf_hash,
@@ -357,8 +430,12 @@ fn document_validation_response(
         (status = 202, description = "Submission accepted", body = SubmissionResponse),
         (status = 400, description = "Invalid submission", body = ErrorResponse),
         (status = 413, description = "PDF exceeds the upload limit", body = ErrorResponse),
+        (status = 422, description = "Invalid PDF", body = ErrorResponse),
         (status = 409, description = "Conflicting data or workflow identity", body = ErrorResponse),
-        (status = 502, description = "Pipeline or workflow error", body = ErrorResponse)
+        (status = 500, description = "Document storage failed", body = ErrorResponse),
+        (status = 502, description = "Invalid upstream response", body = ErrorResponse),
+        (status = 503, description = "Document processing unavailable", body = ErrorResponse),
+        (status = 504, description = "Document processing timed out", body = ErrorResponse)
     ),
     tag = "documents"
 )]
@@ -367,17 +444,9 @@ async fn submit_pdf(
     Path(workflow_id): Path<String>,
     pdf: Bytes,
 ) -> Result<(StatusCode, Json<SubmissionResponse>), ApiError> {
-    state
-        .uploads
-        .submit(&workflow_id, pdf.to_vec())
-        .await
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::InvalidInput {
-                ApiError(StatusCode::BAD_REQUEST, error.to_string())
-            } else {
-                upstream(error)
-            }
-        })?;
+    if let Err(error) = state.uploads.submit(&workflow_id, pdf.to_vec()).await {
+        return Err(document_upload_error(&state, &workflow_id, error, None).await);
+    }
 
     Ok((
         StatusCode::ACCEPTED,
@@ -405,7 +474,14 @@ async fn get_draft(
         .get_draft_document(&pdf_hash)
         .await
         .map_err(internal)?
-        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "document draft not found".into()))?;
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::NOT_FOUND,
+                "Document draft not found",
+                "Upload the document again or refresh the document list",
+            )
+            .with_pdf_hash(pdf_hash.clone())
+        })?;
 
     Ok(Json(DraftResponse { pdf_hash, draft }))
 }
@@ -425,7 +501,11 @@ async fn get_draft(
         (status = 415, description = "Unsupported media type", body = ErrorResponse),
         (status = 422, description = "Invalid request data", body = ErrorResponse),
         (status = 409, description = "Conflicting data or workflow identity", body = ErrorResponse),
-        (status = 502, description = "Workflow error", body = ErrorResponse)
+        (status = 404, description = "Workflow artifact not found", body = ErrorResponse),
+        (status = 500, description = "Document processing failed", body = ErrorResponse),
+        (status = 502, description = "Invalid upstream response", body = ErrorResponse),
+        (status = 503, description = "Document processing unavailable", body = ErrorResponse),
+        (status = 504, description = "Document processing timed out", body = ErrorResponse)
     ),
     tag = "documents"
 )]
@@ -437,11 +517,16 @@ async fn publish_draft(
 ) -> Result<Json<PublishResponse>, ApiError> {
     assign_request_ids(&pdf_hash, &headers, &mut manual_data)?;
     validate_manual_update(&state, &pdf_hash, &manual_data).await?;
-    let published = state
+    let published = match state
         .restate
         .publish_draft(pdf_hash.clone(), manual_data)
         .await
-        .map_err(upstream)?;
+    {
+        Ok(published) => published,
+        Err(error) => {
+            return Err(restate_api_error(&state, error, Some(pdf_hash), None).await);
+        }
+    };
 
     Ok(Json(PublishResponse {
         artifact: DraftResponse {
@@ -539,7 +624,11 @@ async fn get_document_requiring_fixing(
         (status = 415, description = "Unsupported media type", body = ErrorResponse),
         (status = 422, description = "Invalid request data", body = ErrorResponse),
         (status = 409, description = "Conflicting data or workflow identity", body = ErrorResponse),
-        (status = 502, description = "Workflow error", body = ErrorResponse)
+        (status = 404, description = "Workflow artifact not found", body = ErrorResponse),
+        (status = 500, description = "Document processing failed", body = ErrorResponse),
+        (status = 502, description = "Invalid upstream response", body = ErrorResponse),
+        (status = 503, description = "Document processing unavailable", body = ErrorResponse),
+        (status = 504, description = "Document processing timed out", body = ErrorResponse)
     ),
     tag = "review"
 )]
@@ -552,7 +641,7 @@ async fn fix_document(
     let repair = load_repair(&state.drafts, case_id).await?;
     assign_request_ids(&repair.pdf_hash, &headers, &mut request.manual_data)?;
     validate_artifact_update(repair.draft, &request.manual_data)?;
-    let result = state
+    let result = match state
         .restate
         .fix_document(FixDocumentWorkflowRequest {
             case_id,
@@ -560,7 +649,18 @@ async fn fix_document(
             enrich: request.enrich,
         })
         .await
-        .map_err(upstream)?;
+    {
+        Ok(result) => result,
+        Err(error) => {
+            return Err(restate_api_error(
+                &state,
+                error,
+                Some(repair.pdf_hash.clone()),
+                Some(case_id),
+            )
+            .await);
+        }
+    };
 
     Ok(Json(PublishResponse {
         artifact: DraftResponse {
@@ -592,7 +692,14 @@ async fn get_published_document(
         .await
         .map_err(internal)?
         .map(Json)
-        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "published document not found".into()))
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::NOT_FOUND,
+                "Published document not found",
+                "Refresh the document list or publish the document first",
+            )
+            .with_pdf_hash(pdf_hash.clone())
+        })
 }
 
 #[utoipa::path(
@@ -610,7 +717,11 @@ async fn get_published_document(
         (status = 415, description = "Unsupported media type", body = ErrorResponse),
         (status = 422, description = "Invalid request data", body = ErrorResponse),
         (status = 409, description = "Conflicting data or workflow identity", body = ErrorResponse),
-        (status = 502, description = "Workflow error", body = ErrorResponse)
+        (status = 404, description = "Workflow artifact not found", body = ErrorResponse),
+        (status = 500, description = "Document processing failed", body = ErrorResponse),
+        (status = 502, description = "Invalid upstream response", body = ErrorResponse),
+        (status = 503, description = "Document processing unavailable", body = ErrorResponse),
+        (status = 504, description = "Document processing timed out", body = ErrorResponse)
     ),
     tag = "documents"
 )]
@@ -622,11 +733,16 @@ async fn update_document(
 ) -> Result<Json<UpdateDocumentWorkflowResponse>, ApiError> {
     assign_request_ids(&pdf_hash, &headers, &mut manual_data)?;
     validate_manual_update(&state, &pdf_hash, &manual_data).await?;
-    let result = state
+    let result = match state
         .restate
-        .update_document(pdf_hash, manual_data)
+        .update_document(pdf_hash.clone(), manual_data)
         .await
-        .map_err(upstream)?;
+    {
+        Ok(result) => result,
+        Err(error) => {
+            return Err(restate_api_error(&state, error, Some(pdf_hash), None).await);
+        }
+    };
     Ok(Json(result))
 }
 
@@ -648,7 +764,14 @@ async fn validate_manual_update(
             .get_draft_document(pdf_hash)
             .await
             .map_err(internal)?
-            .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "document artifact not found".into()))?
+            .ok_or_else(|| {
+                api_error(
+                    StatusCode::NOT_FOUND,
+                    "Document artifact not found",
+                    "Upload the document again or refresh the document list",
+                )
+                .with_pdf_hash(pdf_hash.to_owned())
+            })?
     };
     validate_artifact_update(artifact, manual_data)
 }
@@ -658,9 +781,13 @@ fn validate_artifact_update(
     manual_data: &ManualDocument,
 ) -> Result<(), ApiError> {
     artifact.manual_data = manual_data.clone();
-    artifact
-        .validate_ids()
-        .map_err(|error| ApiError(StatusCode::UNPROCESSABLE_ENTITY, error))
+    artifact.validate_ids().map_err(|error| {
+        api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            error,
+            "Correct the document identities and try again",
+        )
+    })
 }
 
 fn assign_request_ids(
@@ -677,9 +804,10 @@ fn assign_request_ids(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
-            ApiError(
+            api_error(
                 StatusCode::BAD_REQUEST,
-                "Idempotency-Key is required when creating entities".into(),
+                "Idempotency-Key is required when creating entities",
+                "Add a non-empty Idempotency-Key header and try again",
             )
         })?;
     manual_data.assign_missing_ids(pdf_hash, idempotency_key);
@@ -693,16 +821,20 @@ async fn load_repair(drafts: &PostgresReviewStore, case_id: i64) -> Result<Repai
         .map_err(internal)?
         .filter(|case| case.status == "pending")
         .ok_or_else(|| {
-            ApiError(
+            api_error(
                 StatusCode::NOT_FOUND,
-                "pending review case not found".into(),
+                "Pending review case not found",
+                "Refresh the review list and choose a pending case",
             )
+            .with_review_case_id(case_id)
         })?;
     let pdf_hash = case.pdf_hash.clone().ok_or_else(|| {
-        ApiError(
+        api_error(
             StatusCode::CONFLICT,
-            "review case is not linked to a source PDF".into(),
+            "Review case is not linked to a source PDF",
+            "Contact support with the review-case identifier",
         )
+        .with_review_case_id(case_id)
     })?;
     let draft = drafts.get_repair_draft(&pdf_hash).await.map_err(internal)?;
     Ok(RepairDraft {
@@ -714,24 +846,214 @@ async fn load_repair(drafts: &PostgresReviewStore, case_id: i64) -> Result<Repai
 
 fn internal(error: impl std::fmt::Display) -> ApiError {
     tracing::error!(error = %error, "API request failed internally");
-    ApiError(
+    api_error(
         StatusCode::INTERNAL_SERVER_ERROR,
-        "Internal server error".into(),
+        "Internal server error",
+        "Try again; if the problem continues, contact support",
     )
 }
 
-fn upstream(error: std::io::Error) -> ApiError {
-    if let Some(conflict) = error
-        .get_ref()
-        .and_then(|error| error.downcast_ref::<scepa::conflict::Conflict>())
-    {
-        return ApiError(StatusCode::CONFLICT, conflict.to_string());
-    }
-    tracing::error!(error = %error, "API request failed through an upstream service");
+fn api_error(status: StatusCode, error: impl Into<String>, action: impl Into<String>) -> ApiError {
     ApiError(
-        StatusCode::BAD_GATEWAY,
-        "Upstream service unavailable".into(),
+        status,
+        ErrorResponse {
+            error: error.into(),
+            action: action.into(),
+            workflow_id: None,
+            pdf_hash: None,
+            review_case_id: None,
+        },
     )
+}
+
+async fn document_upload_error(
+    state: &AppState,
+    workflow_id: &str,
+    error: DocumentUploadError,
+    pdf_hash: Option<String>,
+) -> ApiError {
+    match error {
+        DocumentUploadError::InvalidInput(message) => {
+            let mut error = api_error(
+                StatusCode::BAD_REQUEST,
+                message,
+                "Provide a non-empty workflow identifier and try again",
+            );
+            error.1.workflow_id = (!workflow_id.is_empty()).then(|| workflow_id.to_owned());
+            error
+        }
+        DocumentUploadError::Storage(source) => {
+            if let Some(conflict) = source
+                .get_ref()
+                .and_then(|error| error.downcast_ref::<scepa::conflict::Conflict>())
+            {
+                let mut error = api_error(
+                    StatusCode::CONFLICT,
+                    conflict.to_string(),
+                    "Use a new workflow identifier or refresh the existing submission",
+                );
+                error.1.workflow_id = Some(workflow_id.to_owned());
+                return error;
+            }
+            tracing::error!(error = %source, %workflow_id, "PDF storage pipeline failed");
+            let case = latest_review_case(state, workflow_id).await;
+            let mut error = if case
+                .as_ref()
+                .is_some_and(|case| case.service == "garage" && case.phase == "input_validation")
+            {
+                api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "The uploaded file is not a valid PDF",
+                    "Choose a non-empty PDF file and upload it again",
+                )
+            } else if case.is_some() {
+                api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "The PDF could not be stored correctly",
+                    "Try again; if the problem continues, contact support",
+                )
+            } else {
+                api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Document storage is temporarily unavailable",
+                    "Wait a moment and upload the PDF again",
+                )
+            };
+            add_error_context(&mut error, workflow_id, pdf_hash, case.as_ref());
+            error
+        }
+        DocumentUploadError::Workflow(error) => {
+            restate_api_error(state, error, pdf_hash, None).await
+        }
+    }
+}
+
+async fn restate_api_error(
+    state: &AppState,
+    error: RestateError,
+    pdf_hash: Option<String>,
+    review_case_id: Option<i64>,
+) -> ApiError {
+    tracing::error!(error = %error, "API request failed through Restate");
+    let workflow_id = error.workflow_id().to_owned();
+    let mut api_error = classify_restate_error(error.kind(), error.rejection_message());
+
+    let case = latest_review_case(state, &workflow_id).await;
+    add_error_context(&mut api_error, &workflow_id, pdf_hash, case.as_ref());
+    if api_error.1.review_case_id.is_none() {
+        api_error.1.review_case_id = review_case_id;
+    }
+    api_error
+}
+
+fn classify_restate_error(kind: RestateErrorKind, rejection_message: Option<&str>) -> ApiError {
+    match kind {
+        RestateErrorKind::InvalidRequest => api_error(
+            StatusCode::BAD_REQUEST,
+            "The workflow request is invalid",
+            "Correct the request identifiers and try again",
+        ),
+        RestateErrorKind::Unavailable => api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Document processing is temporarily unavailable",
+            "Wait a moment and try again",
+        ),
+        RestateErrorKind::Timeout => api_error(
+            StatusCode::GATEWAY_TIMEOUT,
+            "Document processing timed out",
+            "Try again; if the problem continues, contact support",
+        ),
+        RestateErrorKind::InvalidResponse => api_error(
+            StatusCode::BAD_GATEWAY,
+            "Document processing returned an invalid response",
+            "Try again; if the problem continues, contact support",
+        ),
+        RestateErrorKind::Rejected(404) => api_error(
+            StatusCode::NOT_FOUND,
+            "A required document artifact was not found",
+            "Upload the document again or refresh the document list",
+        ),
+        RestateErrorKind::Rejected(409) => {
+            let message = rejection_message
+                .and_then(scepa::conflict::Conflict::from_message)
+                .map(|conflict| conflict.to_string())
+                .unwrap_or_else(|| "The workflow conflicts with existing data".into());
+            api_error(
+                StatusCode::CONFLICT,
+                message,
+                "Refresh the current data or use a new workflow identifier",
+            )
+        }
+        RestateErrorKind::Rejected(422) => {
+            let enrichment = rejection_message == Some("External enrichment is not available");
+            api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                if enrichment {
+                    "External enrichment is not available"
+                } else {
+                    "The document could not be processed"
+                },
+                if enrichment {
+                    "Submit the repair again with enrichment disabled"
+                } else {
+                    "Review the document and correct its contents before trying again"
+                },
+            )
+        }
+        RestateErrorKind::Rejected(429 | 503) => api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Document processing is temporarily unavailable",
+            "Wait a moment and try again",
+        ),
+        RestateErrorKind::Rejected(408 | 504) => api_error(
+            StatusCode::GATEWAY_TIMEOUT,
+            "Document processing timed out",
+            "Try again; if the problem continues, contact support",
+        ),
+        RestateErrorKind::Rejected(500) => api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Document processing failed",
+            "Try again; if the problem continues, contact support",
+        ),
+        RestateErrorKind::Rejected(status) if (400..500).contains(&status) => api_error(
+            StatusCode::BAD_REQUEST,
+            "The workflow request was rejected",
+            "Correct the request and try again",
+        ),
+        RestateErrorKind::Rejected(_) => api_error(
+            StatusCode::BAD_GATEWAY,
+            "Document processing returned an unexpected error",
+            "Try again; if the problem continues, contact support",
+        ),
+    }
+}
+
+async fn latest_review_case(
+    state: &AppState,
+    workflow_id: &str,
+) -> Option<scepa::postgres::ReviewCase> {
+    match state
+        .drafts
+        .get_latest_pending_case_for_workflow(workflow_id)
+        .await
+    {
+        Ok(case) => case,
+        Err(error) => {
+            tracing::error!(error = %error, %workflow_id, "could not load workflow review context");
+            None
+        }
+    }
+}
+
+fn add_error_context(
+    error: &mut ApiError,
+    workflow_id: &str,
+    pdf_hash: Option<String>,
+    case: Option<&scepa::postgres::ReviewCase>,
+) {
+    error.1.workflow_id = Some(workflow_id.to_owned());
+    error.1.pdf_hash = case.and_then(|case| case.pdf_hash.clone()).or(pdf_hash);
+    error.1.review_case_id = case.map(|case| case.id);
 }
 
 #[cfg(test)]
@@ -752,11 +1074,12 @@ mod tests {
             "application/json"
         );
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        assert_eq!(
-            serde_json::from_slice::<Value>(&body).unwrap(),
-            json!({
-                "error": message
-            })
+        let body = serde_json::from_slice::<Value>(&body).unwrap();
+        assert_eq!(body["error"], message);
+        assert!(
+            body["action"]
+                .as_str()
+                .is_some_and(|action| !action.is_empty())
         );
     }
 
@@ -795,7 +1118,14 @@ mod tests {
             scepa::conflict::Conflict::Submission,
         ] {
             assert_error_response(
-                normalize_framework_error(upstream(conflict.into_io()).into_response()),
+                normalize_framework_error(
+                    api_error(
+                        StatusCode::CONFLICT,
+                        conflict.to_string(),
+                        "Refresh the current data or use a new workflow identifier",
+                    )
+                    .into_response(),
+                ),
                 StatusCode::CONFLICT,
                 &conflict.to_string(),
             )
@@ -816,6 +1146,7 @@ mod tests {
         let response =
             document_validation_response("upload:workflow-1", 42, "a".repeat(64), &draft).unwrap();
         assert_eq!(response.code, "document_validation_failed");
+        assert!(!response.action.is_empty());
         assert_eq!(response.workflow_id, "upload:workflow-1");
         assert_eq!(response.review_case_id, 42);
         assert_eq!(
@@ -841,7 +1172,12 @@ mod tests {
     #[tokio::test]
     async fn api_errors_are_json_objects_with_safe_messages() {
         assert_error_response(
-            ApiError(StatusCode::NOT_FOUND, "PDF not found".into()).into_response(),
+            api_error(
+                StatusCode::NOT_FOUND,
+                "PDF not found",
+                "Upload the PDF again",
+            )
+            .into_response(),
             StatusCode::NOT_FOUND,
             "PDF not found",
         )
@@ -852,12 +1188,40 @@ mod tests {
             "Internal server error",
         )
         .await;
-        assert_error_response(
-            upstream(std::io::Error::other("workflow internals leaked")).into_response(),
-            StatusCode::BAD_GATEWAY,
-            "Upstream service unavailable",
-        )
-        .await;
+    }
+
+    #[test]
+    fn restate_failures_use_semantic_statuses_without_leaking_rejection_details() {
+        for (kind, expected) in [
+            (RestateErrorKind::InvalidRequest, StatusCode::BAD_REQUEST),
+            (RestateErrorKind::Rejected(404), StatusCode::NOT_FOUND),
+            (RestateErrorKind::Rejected(409), StatusCode::CONFLICT),
+            (
+                RestateErrorKind::Rejected(422),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                RestateErrorKind::Rejected(500),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+            (
+                RestateErrorKind::Rejected(429),
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+            (RestateErrorKind::Rejected(408), StatusCode::GATEWAY_TIMEOUT),
+            (RestateErrorKind::InvalidResponse, StatusCode::BAD_GATEWAY),
+            (
+                RestateErrorKind::Unavailable,
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+            (RestateErrorKind::Timeout, StatusCode::GATEWAY_TIMEOUT),
+        ] {
+            let error = classify_restate_error(kind, Some("database password leaked"));
+            assert_eq!(error.0, expected);
+            let body = serde_json::to_string(&error.1).unwrap();
+            assert!(!body.contains("database password leaked"));
+            assert!(!error.1.action.is_empty());
+        }
     }
 
     #[tokio::test]
@@ -1032,10 +1396,18 @@ mod tests {
                 .is_some(),
             "the API error schema must expose a human-readable error message"
         );
+        for property in ["action", "workflow_id", "pdf_hash", "review_case_id"] {
+            assert!(
+                schemas["ErrorResponse"]["properties"]
+                    .get(property)
+                    .is_some(),
+                "the API error schema must expose {property}"
+            );
+        }
         assert_eq!(
             document["paths"]["/pdfs"]["post"]["responses"]["422"]["content"]["application/json"]["schema"]
                 ["$ref"],
-            "#/components/schemas/DocumentValidationErrorResponse"
+            "#/components/schemas/UploadErrorResponse"
         );
 
         for (path, method) in [
@@ -1075,6 +1447,7 @@ mod tests {
                             schema,
                             "#/components/schemas/ErrorResponse"
                                 | "#/components/schemas/DocumentValidationErrorResponse"
+                                | "#/components/schemas/UploadErrorResponse"
                         ),
                         "error response {status} uses an unexpected schema: {schema}"
                     );
