@@ -205,13 +205,14 @@ where
             ));
         }
 
-        let document = self.conversion.process(&tei).await.map_err(|error| {
+        let mut document = self.conversion.process(&tei).await.map_err(|error| {
             document_error(
                 DocumentProcessingStage::TeiConversion,
                 FailureDisposition::Terminal,
                 error,
             )
         })?;
+        document.assign_extracted_ids(&pdf_hash);
 
         self.review_store
             .store_draft_artifact(&pdf_hash, &DraftDocument::new(document.clone()))

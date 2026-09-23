@@ -1,4 +1,4 @@
-use restate_sdk::prelude::{ContextClient, HandlerResult, Json, WorkflowContext};
+use restate_sdk::prelude::{ContextClient, HandlerResult, Json, TerminalError, WorkflowContext};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -73,6 +73,7 @@ impl NewDocumentWorkflow {
             .ok_or_else(|| {
                 restate_sdk::prelude::TerminalError::new("document artifact was not found")
             })?;
+        draft.validate_ids().map_err(TerminalError::new)?;
         let old = ctx
             .service_client::<ArtifactRestateServiceClient>()
             .get_published(Json(stored.pdf_hash.clone()))

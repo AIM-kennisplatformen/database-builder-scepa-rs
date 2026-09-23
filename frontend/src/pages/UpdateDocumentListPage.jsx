@@ -1,29 +1,46 @@
 import { SavePlus } from "lucide-react";
 import CustomTable from "../components/CustomTable";
-import { useEffect, useState } from "react";
+import react, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast, ToastContainer } from "react-toastify";
 
 export default function UpdateDocumentList({}) {
-  const tableHeaders = ["Title", "Stable identifiers", "Published"];
+  const tableHeaders = ["Title", "Published", "Status"];
   const [documents, setDocuments] = useState(null);
-  const [error, setError] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
-    fetch("/api/documents")
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`Failed to load documents`);
-        }
-        return res.json();
-      })
-      .then(setDocuments)
-      .catch((err) => setError(err.message));
+    loadDocuments();
   }, []);
 
-  function tableOnClickHandler(pdf_hash) {
-    if (pdf_hash) {
-      navigate(`/update/${pdf_hash}`);
+  function tableOnClickHandler(document) {
+    // Fixing documents are addressed by review case id, normal ones by pdf_hash.
+    if (document.requiresFixing) {
+      navigate(`/update/${document.id}?requiresFixing=true`);
+    } else if (document.pdf_hash) {
+      navigate(`/update/${document.pdf_hash}`);
+    }
+  }
+
+  async function fetchDocument(url) {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Failed to load documents`);
+    }
+    return res.json();
+  }
+
+  async function loadDocuments() {
+    try {
+      const normal = await fetchDocument("/api/documents");
+      const failed = await fetchDocument("/api/documents/requiring-fixing");
+
+      setDocuments([
+        ...failed.map((doc) => ({ ...doc, requiresFixing: true })),
+        ...normal.map((doc) => ({ ...doc, requiresFixing: false })),
+      ]);
+    } catch (err) {
+      toast.error(err.message);
     }
   }
 
@@ -41,20 +58,20 @@ export default function UpdateDocumentList({}) {
         canonical graph are shown here.
       </p>
       <div className="mt-4 w-full flex-1 min-h-0 max-h-96 overflow-auto">
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        {!error && documents && documents.length > 0 && (
+        {documents && documents.length > 0 && (
           <CustomTable
             headers={tableHeaders}
             documents={documents}
             onClickHandler={tableOnClickHandler}
           />
         )}
-        {!error && documents && documents.length === 0 && (
+        {documents && documents.length === 0 && (
           <p className="text-lg text-primary justify-center flex">
             No uploaded documents found
           </p>
         )}
       </div>
+      <ToastContainer />
     </div>
   );
 }

@@ -2,8 +2,8 @@ import { ChevronDown, Loader2 } from "lucide-react";
 import AuthorDisplay from "../components/AuthorDisplay";
 import PdfViewer from "../components/PdfViewer";
 import UpdateDocumentList from "./UpdateDocumentListPage";
-import { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+import { useParams, useSearchParams } from "react-router-dom";
 import { TEXT_REGEX, isValidField } from "../utils/validation";
 import { Plus } from "lucide-react";
 import { AUTHOR_FIELDS } from "../components/AuthorDisplay";
@@ -61,6 +61,47 @@ function isEmptyValue(value) {
   return value == null || value === "";
 }
 
+// publisher/journal are nested objects ({ id, name, ... }), not plain
+// strings, so the text input reads/writes their `name` sub-field while the
+// rest of the object (id, ror_id, abbreviation, issn) is carried along untouched.
+const NESTED_BIBLIOGRAPHY_KEYS = new Set(["publisher", "journal"]);
+
+function bibliographyFieldDisplayValue(field, bibliographyFieldsData) {
+  const raw = bibliographyFieldsData[field.key];
+  if (NESTED_BIBLIOGRAPHY_KEYS.has(field.key)) {
+    return raw?.name ?? "";
+  }
+  return raw ?? "";
+}
+
+function withBibliographyFieldValue(prev, field, value) {
+  if (field.key === "publisher") {
+    return {
+      ...prev,
+      publisher:
+        value === ""
+          ? null
+          : { id: "", ror_id: null, ...prev.publisher, name: value },
+    };
+  }
+  if (field.key === "journal") {
+    return {
+      ...prev,
+      journal:
+        value === ""
+          ? null
+          : {
+              id: "",
+              abbreviation: null,
+              issn: null,
+              ...prev.journal,
+              name: value,
+            },
+    };
+  }
+  return { ...prev, [field.key]: value };
+}
+
 // The API only ever returns the immutable GROBID extraction plus the sparse
 // manual override patch; it never sends a merged view. Overlay them the same
 // way the backend's DraftDocument::effective_document() does, so reloading
@@ -78,6 +119,8 @@ function effectiveBibliography(artifact) {
     journal_abbreviation:
       manual.journal_abbreviation ?? extracted.journal_abbreviation,
     publisher: manual.publisher ?? extracted.publisher,
+    publication_event_id:
+      manual.publication_event_id ?? extracted.publication_event_id,
     authors: manual.authors ?? extracted.authors ?? [],
   };
 }
@@ -92,22 +135,89 @@ function sanitizeText(value) {
 
 function sanitizeBibliography(bibliographyFieldsData) {
   const publicationYear = sanitizeText(bibliographyFieldsData.publication_year);
+  const publisherName = sanitizeText(bibliographyFieldsData.publisher?.name);
+  const journalName = sanitizeText(bibliographyFieldsData.journal?.name);
 
   return {
     title: sanitizeText(bibliographyFieldsData.title),
     publication_date: sanitizeText(bibliographyFieldsData.publication_date),
     publication_year: publicationYear ? Number(publicationYear) : null,
-    journal: sanitizeText(bibliographyFieldsData.journal),
+    journal: journalName
+      ? {
+          id: bibliographyFieldsData.journal?.id || "",
+          name: journalName,
+          abbreviation: bibliographyFieldsData.journal?.abbreviation ?? null,
+          issn: bibliographyFieldsData.journal?.issn ?? null,
+        }
+      : null,
     journal_abbreviation: sanitizeText(
       bibliographyFieldsData.journal_abbreviation,
     ),
-    publisher: sanitizeText(bibliographyFieldsData.publisher),
+    publisher: publisherName
+      ? {
+          id: bibliographyFieldsData.publisher?.id || "",
+          name: publisherName,
+          ror_id: bibliographyFieldsData.publisher?.ror_id ?? null,
+        }
+      : null,
+    // Not user-editable directly, but must be carried through unchanged so
+    // the backend doesn't mint a second, conflicting publication-event ID.
+    publication_event_id: sanitizeText(
+      bibliographyFieldsData.publication_event_id,
+    ),
   };
+}
+
+function createBlankContributor() {
+  return {
+    _key: crypto.randomUUID(),
+    id: "",
+    contribution_id: "",
+    name: null,
+    forename: null,
+    surname: null,
+    affiliation: null,
+    role: null,
+    isOpen: true,
+  };
+}
+
+// affiliation is a nested object ({ id, organization: { name, ... } }), not a
+// plain string, so validation and display need the flat organization name.
+function authorFieldDisplayValue(field, author) {
+  if (field.key === "affiliation") {
+    return author.affiliation?.organization?.name ?? "";
+  }
+  return author[field.key] ?? "";
+}
+
+// Builds the nested affiliation shape from the plain organization-name string
+// AuthorDisplay's input produces, preserving any previously loaded IDs.
+function applyAuthorFieldChange(author, field, value) {
+  if (field === "affiliation") {
+    if (value === "") {
+      return { ...author, affiliation: null };
+    }
+    return {
+      ...author,
+      affiliation: {
+        id: author.affiliation?.id ?? "",
+        organization: {
+          id: "",
+          ror_id: null,
+          ...author.affiliation?.organization,
+          name: value,
+        },
+      },
+    };
+  }
+  return { ...author, [field]: value };
 }
 
 // The backend requires a non-null `name`, but AuthorDisplay never exposes a
 // name input, so derive it from forename/surname. Rows left completely blank
-// (e.g. an "add author" click nobody filled in) are dropped.
+// (e.g. an "add author" click nobody filled in) are dropped. IDs are kept
+// from loaded contributors and left empty for new ones, so the API assigns them.
 function sanitizeContributor(author) {
   const forename = sanitizeText(author.forename);
   const surname = sanitizeText(author.surname);
@@ -116,17 +226,32 @@ function sanitizeContributor(author) {
 
   if (isEmptyValue(name)) return null;
 
+  const affiliationName = sanitizeText(author.affiliation?.organization?.name);
+
   return {
+    id: author.id || "",
+    contribution_id: author.contribution_id || "",
     name,
     forename,
     surname,
-    affiliation: sanitizeText(author.affiliation),
+    affiliation: affiliationName
+      ? {
+          id: author.affiliation?.id || "",
+          organization: {
+            id: author.affiliation?.organization?.id || "",
+            name: affiliationName,
+            ror_id: author.affiliation?.organization?.ror_id ?? null,
+          },
+        }
+      : null,
     role: sanitizeText(author.role) ?? "author",
   };
 }
 
 export default function UpdateDocumentPage({}) {
   const { pdf_hash } = useParams();
+  const [searchParams] = useSearchParams();
+  const requiresFixing = searchParams.get("requiresFixing") === "true";
   const [documentData, setDocumentData] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isBibliographyOpen, setIsBibliographyOpen] = useState(true);
@@ -138,69 +263,130 @@ export default function UpdateDocumentPage({}) {
     journal: null,
     journal_abbreviation: null,
     publisher: null,
+    publication_event_id: null,
   });
   const [bibliographyFieldErrors, setBibliographyFieldErrors] = useState({});
   const [contributorsFieldsData, setContributorsFieldsData] = useState([
-    {
-      name: null,
-      forename: null,
-      surname: null,
-      affiliation: null,
-      role: null,
-    },
+    createBlankContributor(),
   ]);
+  const pendingSaveRef = useRef(null);
 
   const bibliography =
     documentData?.artifact?.grobid_extraction_data?.bibliography;
+  // For fixing documents the route param is the review case id, so the real
+  // hash comes from the response.
+  const pdfHash = requiresFixing ? documentData?.pdfHash : pdf_hash;
 
   useEffect(() => {
-    if (pdf_hash) {
-      fetch(`/api/documents/${pdf_hash}`)
-        .then((res) => {
-          if (!res.ok) {
-            throw new Error("Failed to load documents");
-          }
-          return res.json();
-        })
-        .then((res) => {
-          setDocumentData(res);
-
-          const bibliography = effectiveBibliography(res?.artifact);
-
-          if (bibliography) {
-            setBibliographyFieldsData({
-              title: bibliography.title,
-              publication_date: bibliography.publication_date,
-              publication_year: bibliography.publication_year,
-              journal: bibliography.journal,
-              journal_abbreviation: bibliography.journal_abbreviation,
-              publisher: bibliography.publisher,
-            });
-
-            setContributorsFieldsData(
-              bibliography.authors.map((author) => ({
-                name: author.name,
-                forename: author.forename,
-                surname: author.surname,
-                affiliation: author.affiliation,
-                role: author.role,
-              })),
-            );
-          }
-        })
-        .catch((err) => toast.error(err.message));
+    if (!pdf_hash) return;
+    if (requiresFixing) {
+      loadFixingDocument();
+    } else {
+      loadNormalDocument();
     }
-  }, [pdf_hash]);
+  }, [pdf_hash, requiresFixing]);
 
-  function onAuthorDeleteHandler(authorId) {}
+  async function fetchJson(url) {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error("Failed to load documents");
+    }
+    return res.json();
+  }
+
+  // GET /documents/{pdf_hash} -> { artifact: <draft fields> }
+  function loadNormalDocument() {
+    fetchJson(`/api/documents/${pdf_hash}`)
+      .then((res) =>
+        applyDocument({ artifact: res.artifact, pdfHash: pdf_hash }),
+      )
+      .catch((err) => toast.error(err.message));
+  }
+
+  // GET /documents/requiring-fixing/{case_id} -> { case, draft: { pdf_hash, ...draft fields } }
+  function loadFixingDocument() {
+    fetchJson(`/api/documents/requiring-fixing/${pdf_hash}`)
+      .then((res) =>
+        applyDocument({ artifact: res.draft, pdfHash: res.draft.pdf_hash }),
+      )
+      .catch((err) => toast.error(err.message));
+  }
+
+  // Both endpoints are normalized to { artifact, pdfHash } before this point,
+  // so everything below is shared.
+  function applyDocument(document) {
+    setDocumentData(document);
+
+    const bibliography = effectiveBibliography(document.artifact);
+
+    if (bibliography) {
+      setBibliographyFieldsData({
+        title: bibliography.title,
+        publication_date: bibliography.publication_date,
+        publication_year: bibliography.publication_year,
+        journal: bibliography.journal,
+        journal_abbreviation: bibliography.journal_abbreviation,
+        publisher: bibliography.publisher,
+        publication_event_id: bibliography.publication_event_id,
+      });
+
+      setContributorsFieldsData(
+        bibliography.authors.map((author) => ({
+          _key: author.id || crypto.randomUUID(),
+          id: author.id ?? "",
+          contribution_id: author.contribution_id ?? "",
+          name: author.name,
+          forename: author.forename,
+          surname: author.surname,
+          affiliation: author.affiliation ?? null,
+          role: author.role,
+          isOpen: false,
+        })),
+      );
+    }
+  }
+
+  // Sends the idempotency key from the previous attempt when retrying the
+  // same unchanged payload, and mints a fresh one whenever the payload changes.
+  // PUT /documents/{pdf_hash} takes the ManualDocument directly, while
+  // PUT /documents/requiring-fixing/{case_id} wraps it as { manual_data, enrich }.
+  // For fixing documents the route param is the case id.
+  function saveDocument(manualDocument) {
+    const url = requiresFixing
+      ? `/api/documents/requiring-fixing/${pdf_hash}`
+      : `/api/documents/${pdf_hash}`;
+    const body = JSON.stringify(
+      requiresFixing
+        ? { manual_data: manualDocument, enrich: false }
+        : manualDocument,
+    );
+
+    if (!pendingSaveRef.current || pendingSaveRef.current.body !== body) {
+      pendingSaveRef.current = { body, key: crypto.randomUUID() };
+    }
+
+    return fetch(url, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": pendingSaveRef.current.key,
+      },
+      body,
+    });
+  }
 
   function onDocumentSave(bibliographyFieldsData, contributorsFieldsData) {
     //check if data arrays are empty
     const hasBibliographyData = Object.values(bibliographyFieldsData).some(
       (value) => !isEmptyValue(value),
     );
+    // _key is a client-only React list key (always present, even on a blank
+    // row), so it's excluded here to keep this an actual "did the user type
+    // anything" check.
     const hasContributorsData = contributorsFieldsData.some((author) =>
-      Object.values(author).some((value) => !isEmptyValue(value)),
+      Object.entries(author).some(
+        ([field, value]) => field !== "_key" && !isEmptyValue(value),
+      ),
     );
 
     if (!hasBibliographyData && !hasContributorsData) {
@@ -210,11 +396,16 @@ export default function UpdateDocumentPage({}) {
 
     //validate the data from both the data arrays
     const bibliographyInvalid = BIBLIOGRAPHY_FIELDS.some(
-      (field) => !isValidField(bibliographyFieldsData[field.key], field.regex),
+      (field) =>
+        !isValidField(
+          bibliographyFieldDisplayValue(field, bibliographyFieldsData),
+          field.regex,
+        ),
     );
     const contributorsInvalid = contributorsFieldsData.some((author) =>
       AUTHOR_FIELDS.some(
-        (field) => !isValidField(author[field.key], field.regex),
+        (field) =>
+          !isValidField(authorFieldDisplayValue(field, author), field.regex),
       ),
     );
 
@@ -231,12 +422,7 @@ export default function UpdateDocumentPage({}) {
 
     setIsSaving(true);
 
-    //fetch the data to the /document/{pdf_hash}
-    fetch(`/api/documents/${pdf_hash}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bibliography }),
-    })
+    saveDocument({ bibliography })
       .then((response) => {
         //handle the errors like in the uploadPage
         if (!response.ok) {
@@ -245,10 +431,14 @@ export default function UpdateDocumentPage({}) {
           });
         }
 
+        pendingSaveRef.current = null;
         return response.json();
       })
       .then(() => {
-        toast(<CustomSuccessToast />, { autoClose: 7000 });
+        toast(<CustomSuccessToast />, {
+          autoClose: 7000,
+          progressClassName: "!bg-primary !bg-none",
+        });
       })
       .catch((err) => {
         toast.error(err.message);
@@ -259,7 +449,7 @@ export default function UpdateDocumentPage({}) {
   return (
     <div className="flex h-screen w-full py-6 mt-1">
       <div className="w-2/3 h-full overflow-y-auto border-r border-border">
-        <PdfViewer file={`/api/pdfs/${pdf_hash}`} />
+        {pdfHash && <PdfViewer file={`/api/pdfs/${pdfHash}`} />}
       </div>
       <div className="w-1/3 h-full overflow-y-auto bg-white p-2 text-black">
         {/* {error && <p className="text-destructive">{error}</p>} */}
@@ -284,13 +474,15 @@ export default function UpdateDocumentPage({}) {
                       <span className="font-medium">{field.label}</span>
                       <input
                         type={field.type}
-                        defaultValue={bibliographyFieldsData[field.key] ?? ""}
+                        defaultValue={bibliographyFieldDisplayValue(
+                          field,
+                          bibliographyFieldsData,
+                        )}
                         onChange={(e) => {
                           const value = e.target.value;
-                          setBibliographyFieldsData((prev) => ({
-                            ...prev,
-                            [field.key]: value,
-                          }));
+                          setBibliographyFieldsData((prev) =>
+                            withBibliographyFieldValue(prev, field, value),
+                          );
                           setBibliographyFieldErrors((prev) => ({
                             ...prev,
                             [field.key]: !isValidField(value, field.regex),
@@ -333,18 +525,24 @@ export default function UpdateDocumentPage({}) {
                   <span className="font-medium text-sm text-primary">
                     Authors
                   </span>
-                  {contributorsFieldsData.map((author, index) => (
+                  {contributorsFieldsData.map((author) => (
                     <AuthorDisplay
-                      key={index}
+                      key={author._key}
                       author={author}
                       onChange={(field, value) =>
                         setContributorsFieldsData((prev) =>
-                          prev.map((a, i) =>
-                            i === index ? { ...a, [field]: value } : a,
+                          prev.map((a) =>
+                            a._key === author._key
+                              ? applyAuthorFieldChange(a, field, value)
+                              : a,
                           ),
                         )
                       }
-                      onDelete={onAuthorDeleteHandler}
+                      onDelete={() =>
+                        setContributorsFieldsData((prev) =>
+                          prev.filter((a) => a._key !== author._key),
+                        )
+                      }
                     />
                   ))}
                   <button
@@ -352,13 +550,7 @@ export default function UpdateDocumentPage({}) {
                     onClick={() => {
                       setContributorsFieldsData((prev) => [
                         ...prev,
-                        {
-                          name: null,
-                          forename: null,
-                          surname: null,
-                          affiliation: null,
-                          role: null,
-                        },
+                        createBlankContributor(),
                       ]);
                     }}
                   >

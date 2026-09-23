@@ -555,7 +555,6 @@ mod tests {
             id: id.into(),
             text: value.into(),
             coordinates: vec![],
-            references: vec![],
             heading_context: None,
             section: None,
         }
@@ -563,6 +562,7 @@ mod tests {
 
     fn document(abstracts: Vec<TextPassage>, body: Vec<Passage>) -> TeiDocument {
         TeiDocument {
+            id: String::new(),
             level: PassageLevel::Paragraph,
             bibliography: Bibliography {
                 abstract_text: abstracts,
@@ -570,7 +570,6 @@ mod tests {
             },
             body_text: body,
             figures_and_tables: vec![],
-            references: vec![],
         }
     }
 

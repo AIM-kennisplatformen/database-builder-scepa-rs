@@ -44,6 +44,7 @@ impl EContributor {
 
 #[enum_dispatch]
 pub trait TContribution: Send + Sync {
+    fn contribution_id(&self) -> &str;
     fn contributor(&self) -> &EContributor;
     fn work(&self) -> &EDocument;
     fn relation_type(&self) -> &'static str;
@@ -53,11 +54,15 @@ pub trait TContribution: Send + Sync {
     Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
 )]
 pub struct Contribution {
+    pub contribution_id: String,
     pub contributor: Arc<EContributor>,
     pub work: Arc<EDocument>,
 }
 
 impl TContribution for Contribution {
+    fn contribution_id(&self) -> &str {
+        &self.contribution_id
+    }
     fn contributor(&self) -> &EContributor {
         self.contributor.as_ref()
     }
@@ -77,12 +82,16 @@ pub trait TAuthorship: TContribution {}
     Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
 )]
 pub struct Authorship {
+    pub contribution_id: String,
     pub contributor: Arc<EContributor>,
     pub work: Arc<EDocument>,
 }
 
 impl TAuthorship for Authorship {}
 impl TContribution for Authorship {
+    fn contribution_id(&self) -> &str {
+        &self.contribution_id
+    }
     fn contributor(&self) -> &EContributor {
         self.contributor.as_ref()
     }
@@ -102,12 +111,16 @@ pub trait TPeerReview: TContribution {}
     Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
 )]
 pub struct PeerReview {
+    pub contribution_id: String,
     pub contributor: Arc<EContributor>,
     pub work: Arc<EDocument>,
 }
 
 impl TPeerReview for PeerReview {}
 impl TContribution for PeerReview {
+    fn contribution_id(&self) -> &str {
+        &self.contribution_id
+    }
     fn contributor(&self) -> &EContributor {
         self.contributor.as_ref()
     }

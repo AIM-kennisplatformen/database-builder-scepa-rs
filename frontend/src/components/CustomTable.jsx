@@ -1,8 +1,4 @@
-import { ChevronRight } from "lucide-react";
-
-function identifierKindLabel(kind) {
-  return typeof kind === "string" ? kind : kind.other;
-}
+import { ChevronRight, TriangleAlert } from "lucide-react";
 
 export default function CustomTable({
   headers,
@@ -31,27 +27,31 @@ export default function CustomTable({
               key={index}
               className="border-b border-border last:border-0 hover:bg-muted/50"
             >
-              <td className="px-3 py-2 font-medium">{document.title}</td>
-              <td className="px-3 py-2 space-x-1">
-                {document.identifiers.map((identifier) => (
-                  <code
-                    key={`${identifierKindLabel(identifier.kind)}-${identifier.value}`}
-                    className="rounded bg-muted px-1.5 py-0.5 font-mono text-muted-foreground text-xs"
-                  >
-                    <span className="text-primary font-semibold">
-                      {identifierKindLabel(identifier.kind)}
-                    </span>
-                    : {identifier.value}
-                  </code>
-                ))}
+              <td className="px-3 py-2 font-medium">
+                {document.title ? document.title : "[Missing title]"}
               </td>
-              <td className="px-3 py-2 ">{document.published_at}</td>
+              <td className="px-3 py-2 ">
+                {document.published_at
+                  ? document.published_at?.split(/[ T]/)[0]
+                  : "[Missing date]"}
+              </td>
+              <td className="px-3 py-2 ">
+                {document.requiresFixing ? (
+                  <div className="flex flex-row">
+                    <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">
+                      Requires fixing
+                    </span>
+                  </div>
+                ) : (
+                  <span className="rounded bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
+                    Published
+                  </span>
+                )}
+              </td>
               <td className="px-3 py-2 ">
                 <button
                   className="bg-accent! border-primary! hover:bg-gray-200!"
-                  onClick={() =>
-                    onClickHandler(document.pdf_hash, setCurrentFile)
-                  }
+                  onClick={() => onClickHandler(document, setCurrentFile)}
                 >
                   <ChevronRight className="text-primary size-4" />
                 </button>

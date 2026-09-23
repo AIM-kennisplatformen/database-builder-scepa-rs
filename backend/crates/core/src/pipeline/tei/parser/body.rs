@@ -1,11 +1,11 @@
-//! Body passage extraction, whitespace normalization, and reference offsets.
+//! Body passage extraction and whitespace normalization.
 
-use crate::models::draft::{FormulaPassage, Passage, PassageLevel, ReferenceSpan, TextPassage};
+use crate::models::draft::{FormulaPassage, Passage, PassageLevel, TextPassage};
 
 use super::{
     Counters,
     common::{non_empty_text, parse_coordinates},
-    xml::{XmlElement, XmlNode, clean_text},
+    xml::{XmlElement, XmlNode},
 };
 
 pub(super) fn parse_body(
@@ -99,7 +99,8 @@ fn parse_div(
                 }
             },
             "formula" => {
-                if let Some(text) = non_empty_text(element) {
+                let text = text_without_citations(element);
+                if !text.is_empty() {
                     counters.formula += 1;
                     output.push(Passage::Formula(FormulaPassage {
                         id: element
@@ -125,15 +126,10 @@ pub(super) fn parse_text_passage(
     heading_context: Option<String>,
     section: Option<String>,
 ) -> TextPassage {
-    let (text, references) = text_and_references(element);
-    debug_assert!(references.iter().all(|reference| {
-        text.get(reference.byte_start..reference.byte_end) == Some(reference.text.as_str())
-    }));
     TextPassage {
         id: element.attr("id").map(str::to_owned).unwrap_or(fallback_id),
-        text,
+        text: text_without_citations(element),
         coordinates: parse_coordinates(element.attr("coords")),
-        references,
         heading_context,
         section,
     }
@@ -159,50 +155,23 @@ impl NormalizedText {
             }
         }
     }
-
-    fn push_atomic(&mut self, text: &str) -> (usize, usize) {
-        let text = clean_text(text);
-        if text.is_empty() {
-            return (self.output.len(), self.output.len());
-        }
-        if self.pending_space && !self.output.is_empty() {
-            self.output.push(' ');
-        }
-        self.pending_space = false;
-        let start = self.output.len();
-        self.output.push_str(&text);
-        (start, self.output.len())
-    }
 }
 
-fn text_and_references(element: &XmlElement) -> (String, Vec<ReferenceSpan>) {
-    fn walk(element: &XmlElement, text: &mut NormalizedText, references: &mut Vec<ReferenceSpan>) {
+fn text_without_citations(element: &XmlElement) -> String {
+    fn walk(element: &XmlElement, text: &mut NormalizedText) {
         for child in &element.children {
             match child {
                 XmlNode::Text(value) => text.push_text(value),
                 XmlNode::Element(child)
-                    if child.name == "ref" && child.attr("type") == Some("bibr") =>
-                {
-                    let reference_text = child.text();
-                    let (byte_start, byte_end) = text.push_atomic(&reference_text);
-                    if byte_start < byte_end {
-                        references.push(ReferenceSpan {
-                            target: child.attr("target").map(str::to_owned),
-                            text: reference_text,
-                            byte_start,
-                            byte_end,
-                        });
-                    }
-                }
-                XmlNode::Element(child) => walk(child, text, references),
+                    if child.name == "ref" && child.attr("type") == Some("bibr") => {}
+                XmlNode::Element(child) => walk(child, text),
             }
         }
     }
 
     let mut text = NormalizedText::default();
-    let mut references = Vec::new();
-    walk(element, &mut text, &mut references);
-    (text.output, references)
+    walk(element, &mut text);
+    text.output
 }
 
 fn section_name(value: &str) -> String {
