@@ -1,7 +1,7 @@
-import { SavePlus } from "lucide-react";
+import { SavePlus, Upload } from "lucide-react";
 import CustomTable from "../components/CustomTable";
 import react, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { toast, ToastContainer } from "react-toastify";
 
 export default function UpdateDocumentList({}) {
@@ -45,33 +45,42 @@ export default function UpdateDocumentList({}) {
   }
 
   return (
-    <div className="rounded-lg bg-white p-8 shadow-md text-primary flex flex-col max-w-7xl items-center max-h-full overflow-hidden">
-      <div className="flex flex-row gap-1.5 mb-2">
-        <SavePlus className="size-4" />
-        <h2 className="text-xs font-semibold">Update documents</h2>
+    <div className="flex flex-col">
+      <div className="flex justify-end my-3">
+        <button className=" ps-3! ">
+          <NavLink to={"/upload"} className="flex flex-row gap-2">
+            <Upload className="size-5" />
+            Upload a document
+          </NavLink>
+        </button>
       </div>
-      <h1 className="text-lg text-black font-bold">
-        Select a published document
-      </h1>
-      <p className="text-xs text-muted-foreground italic mt-2">
-        Only documents that successfully passed the pipeline and reached the
-        canonical graph are shown here.
-      </p>
-      <div className="mt-4 w-full flex-1 min-h-0 max-h-96 overflow-auto">
-        {documents && documents.length > 0 && (
-          <CustomTable
-            headers={tableHeaders}
-            documents={documents}
-            onClickHandler={tableOnClickHandler}
-          />
-        )}
-        {documents && documents.length === 0 && (
-          <p className="text-lg text-primary justify-center flex">
-            No uploaded documents found
-          </p>
-        )}
+      <div className="rounded-lg bg-white p-8 shadow-md text-primary flex-col max-w-7xl items-center max-h-full overflow-hidden">
+        <div className="flex flex-row gap-1.5 mb-2 justify-center ">
+          <SavePlus className="size-4" />
+          <h2 className="text-xs font-semibold">Update documents</h2>
+        </div>
+        <h1 className="text-lg text-black font-bold text-center">
+          Select a document
+        </h1>
+        <p className="text-xs text-muted-foreground italic mt-2 text-center">
+          All uploaded documents are shown here.
+        </p>
+        <div className="mt-4 w-full flex-1 min-h-0 max-h-96 overflow-auto">
+          {documents && documents.length > 0 && (
+            <CustomTable
+              headers={tableHeaders}
+              documents={documents}
+              onClickHandler={tableOnClickHandler}
+            />
+          )}
+          {documents && documents.length === 0 && (
+            <p className="text-lg text-primary justify-center flex">
+              No uploaded documents found
+            </p>
+          )}
+        </div>
+        <ToastContainer />
       </div>
-      <ToastContainer />
     </div>
   );
 }
