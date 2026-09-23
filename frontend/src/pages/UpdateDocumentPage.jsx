@@ -15,7 +15,7 @@ import CustomSuccessToast from "../components/CustomSuccessToast";
 const BIBLIOGRAPHY_FIELDS = [
   {
     key: "title",
-    label: "Title",
+    label: "Title*",
     type: "text",
     regex: TEXT_REGEX,
     placeholder: "Energy poverty solotions",
@@ -389,8 +389,18 @@ export default function UpdateDocumentPage({}) {
       ),
     );
 
-    if (!hasBibliographyData && !hasContributorsData) {
-      toast.error("There is no data to save.");
+    if (
+      (!hasBibliographyData && !hasContributorsData) ||
+      hasContributorsData == []
+    ) {
+      toast.error(
+        <span>
+          There is no data to save. <br />
+          <em className="text-sm text-red-400">
+            Provide at least a valid title and one author
+          </em>
+        </span>,
+      );
       return;
     }
 
@@ -518,7 +528,7 @@ export default function UpdateDocumentPage({}) {
                     isAuthorsOpen ? "" : "-rotate-90"
                   }`}
                 />
-                <h3 className="text-primary font-bold">Authors</h3>
+                <h3 className="text-primary font-bold">Authors*</h3>
               </div>
               {isAuthorsOpen && (
                 <>
