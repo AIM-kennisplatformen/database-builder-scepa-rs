@@ -47,12 +47,12 @@ export default function UpdateDocumentList({}) {
   return (
     <div className="flex flex-col">
       <div className="flex justify-end my-3">
-        <button className=" ps-3! ">
-          <NavLink to={"/upload"} className="flex flex-row gap-2">
+        <NavLink to={"/upload"}>
+          <button className="ps-3! flex flex-row gap-2">
             <Upload className="size-5" />
             Upload a document
-          </NavLink>
-        </button>
+          </button>
+        </NavLink>
       </div>
       <div className="rounded-lg bg-white p-8 shadow-md text-primary flex-col max-w-7xl items-center max-h-full overflow-hidden">
         <div className="flex flex-row gap-1.5 mb-2 justify-center ">

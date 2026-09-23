@@ -67,12 +67,12 @@ export default function UploadDocumentPage() {
 
   return (
     <div className="max-w-5xl mx-auto">
-      <button className="bg-white! text-primary! ps-1! my-3 hover:bg-gray-300!">
-        <NavLink to={"/updatelist"} className="flex flex-row">
+      <NavLink to={"/updatelist"}>
+        <button className="bg-white! text-primary! ps-1! my-3 flex flex-row hover:bg-gray-300!">
           <ChevronLeft />
           Back to library
-        </NavLink>
-      </button>
+        </button>
+      </NavLink>
       <div className="rounded-lg bg-white p-8 shadow-md text-primary max-w-5xl">
         <h2 className="text-xl font-bold">Upload a document</h2>
         <p className="text-xs text-muted-foreground italic">
