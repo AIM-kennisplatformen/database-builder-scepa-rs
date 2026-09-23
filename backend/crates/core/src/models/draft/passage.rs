@@ -11,10 +11,10 @@ pub enum Passage {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 #[builder(on(String, into))]
 pub struct TextPassage {
+    #[serde(default)]
     pub id: String,
     pub text: String,
     pub coordinates: Vec<BoundingBox>,
-    pub references: Vec<ReferenceSpan>,
     pub heading_context: Option<String>,
     pub section: Option<String>,
 }
@@ -22,6 +22,7 @@ pub struct TextPassage {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 #[builder(on(String, into))]
 pub struct FormulaPassage {
+    #[serde(default)]
     pub id: String,
     pub text: String,
     pub label: Option<String>,
@@ -38,16 +39,4 @@ pub struct BoundingBox {
     pub y: f64,
     pub width: f64,
     pub height: f64,
-}
-
-/// A bibliographic reference embedded in passage text.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
-#[builder(on(String, into))]
-pub struct ReferenceSpan {
-    pub target: Option<String>,
-    pub text: String,
-    /// Inclusive UTF-8 byte offset into the containing passage.
-    pub byte_start: usize,
-    /// Exclusive UTF-8 byte offset into the containing passage.
-    pub byte_end: usize,
 }

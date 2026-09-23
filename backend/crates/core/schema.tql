@@ -5,6 +5,9 @@ attribute document_id sub id;
 attribute person_id sub id;
 attribute organization_id sub id;
 attribute venue_id sub id;
+attribute contribution_id sub id;
+attribute affiliation_id sub id;
+attribute publication_event_id sub id;
 
 attribute doi sub id;
 attribute isbn sub id;
@@ -72,6 +75,7 @@ entity journal sub publication_venue;
 entity conference sub publication_venue;
 
 relation contribution,
+    owns contribution_id @unique,
     relates contributor @card(1),
     relates work @card(1);
 
@@ -79,6 +83,7 @@ relation authorship sub contribution;
 relation peer_review sub contribution;
 
 relation publication_event @abstract,
+    owns publication_event_id @unique,
     relates publisher,
     relates venue,
     relates work @card(1),
@@ -91,6 +96,7 @@ relation publication sub publication_event,
     owns version_number;
 
 relation affiliation,
+    owns affiliation_id @unique,
     relates person @card(1),
     relates organization @card(1),
     relates evidence @card(1..);

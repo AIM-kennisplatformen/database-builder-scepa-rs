@@ -47,6 +47,15 @@ backfill is performed. A single oversized passage is kept whole.
 HTTP calls (default `4`). The CLI sends
 uploads to `SCEPA_API_URL` (default `http://localhost:3000`).
 
+Draft responses contain deterministic UUIDv5 identifiers for documents,
+contributors, organizations, venues, passages, media, and graph
+relations. The identifiers are scoped to the PDF and remain unchanged when an
+object's metadata or list position changes. Update requests preserve IDs for
+existing objects. When a `PUT` creates an object without an ID, it must include
+an `Idempotency-Key` header; retrying with the same key generates the same IDs.
+Publisher, journal, and affiliation values are represented as nested objects
+instead of plain strings.
+
 ## Database import and export
 
 TypeDB Console must be installed and the `typedb` executable must be available

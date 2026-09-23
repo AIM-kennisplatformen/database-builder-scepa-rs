@@ -72,6 +72,7 @@ impl UpdateDocumentWorkflow {
         };
         let mut new_artifact = source_artifact;
         new_artifact.manual_data = request.manual_data;
+        new_artifact.validate_ids().map_err(TerminalError::new)?;
         ctx.service_client::<ArtifactRestateServiceClient>()
             .store_draft(Json(StoreArtifactRequest {
                 pdf_hash: request.pdf_hash.clone(),

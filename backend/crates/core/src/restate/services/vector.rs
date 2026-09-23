@@ -78,11 +78,11 @@ mod tests {
     #[test]
     fn update_request_keeps_both_effective_documents() {
         let document = TeiDocument {
+            id: String::new(),
             level: PassageLevel::Paragraph,
             bibliography: Bibliography::default(),
             body_text: vec![],
             figures_and_tables: vec![],
-            references: vec![],
         };
         let request = VectorUpdateRequest {
             pdf_hash: "a".repeat(64),
