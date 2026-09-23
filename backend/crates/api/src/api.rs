@@ -12,7 +12,7 @@ use axum::{
 use scepa::{
     document_upload::DocumentUpload,
     models::{
-        canonical::CanonicalModel,
+        canonical::{CanonicalMissingField, CanonicalModel, canonical_missing_fields},
         draft::{DraftDocument, ManualDocument},
     },
     pipeline::garage::GaragePipelineService,
@@ -83,6 +83,7 @@ struct PublishResponse {
 struct RepairDraftResponse {
     case: scepa::postgres::ReviewCase,
     draft: DraftResponse,
+    missing_fields: Vec<CanonicalMissingField>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -95,6 +96,16 @@ struct RepairDocumentRequest {
 #[derive(Serialize, ToSchema)]
 struct ErrorResponse {
     error: String,
+}
+
+#[derive(Serialize, ToSchema)]
+struct DocumentValidationErrorResponse {
+    error: String,
+    code: String,
+    workflow_id: String,
+    pdf_hash: String,
+    review_case_id: i64,
+    missing_fields: Vec<CanonicalMissingField>,
 }
 
 #[derive(Debug)]
@@ -255,16 +266,27 @@ async fn download_pdf(
     responses(
         (status = 201, description = "Document processed", body = UploadResponse),
         (status = 413, description = "PDF exceeds the upload limit", body = ErrorResponse),
+        (status = 422, description = "Extracted document requires correction", body = DocumentValidationErrorResponse),
         (status = 409, description = "Conflicting data or workflow identity", body = ErrorResponse),
         (status = 502, description = "Pipeline or workflow error", body = ErrorResponse)
     ),
     tag = "documents"
 )]
-async fn upload_pdf(
-    State(state): State<AppState>,
-    pdf: Bytes,
-) -> Result<(StatusCode, Json<UploadResponse>), ApiError> {
-    let upload = state.uploads.run(pdf.to_vec()).await.map_err(upstream)?;
+async fn upload_pdf(State(state): State<AppState>, pdf: Bytes) -> Result<Response, ApiError> {
+    let upload = match state.uploads.run(pdf.to_vec()).await {
+        Ok(upload) => upload,
+        Err(failure) => {
+            if let Some(validation) =
+                upload_validation_response(&state, &failure.workflow_id).await?
+            {
+                let mut response =
+                    (StatusCode::UNPROCESSABLE_ENTITY, Json(validation)).into_response();
+                response.extensions_mut().insert(StructuredApiError);
+                return Ok(response);
+            }
+            return Err(upstream(failure.source));
+        }
+    };
 
     Ok((
         StatusCode::CREATED,
@@ -272,7 +294,58 @@ async fn upload_pdf(
             workflow_id: upload.workflow_id,
             result: upload.result,
         }),
+    )
+        .into_response())
+}
+
+async fn upload_validation_response(
+    state: &AppState,
+    workflow_id: &str,
+) -> Result<Option<DocumentValidationErrorResponse>, ApiError> {
+    let Some(case) = state
+        .drafts
+        .get_pending_case_for_workflow(workflow_id, "typedb", "input_validation")
+        .await
+        .map_err(internal)?
+        .filter(|case| !case.retryable)
+    else {
+        return Ok(None);
+    };
+    let Some(pdf_hash) = case.pdf_hash.clone() else {
+        return Ok(None);
+    };
+    let draft = state
+        .drafts
+        .get_repair_draft(&pdf_hash)
+        .await
+        .map_err(internal)?;
+    Ok(document_validation_response(
+        workflow_id,
+        case.id,
+        pdf_hash,
+        &draft,
     ))
+}
+
+fn document_validation_response(
+    workflow_id: &str,
+    review_case_id: i64,
+    pdf_hash: String,
+    draft: &DraftDocument,
+) -> Option<DocumentValidationErrorResponse> {
+    let missing_fields = canonical_missing_fields(&draft.effective_document());
+    if missing_fields.is_empty() {
+        return None;
+    }
+
+    Some(DocumentValidationErrorResponse {
+        error: "Document requires correction".into(),
+        code: "document_validation_failed".into(),
+        workflow_id: workflow_id.into(),
+        pdf_hash,
+        review_case_id,
+        missing_fields,
+    })
 }
 
 #[utoipa::path(
@@ -439,6 +512,7 @@ async fn get_document_requiring_fixing(
     Path(case_id): Path<i64>,
 ) -> Result<Json<RepairDraftResponse>, ApiError> {
     let repair = load_repair(&state.drafts, case_id).await?;
+    let missing_fields = canonical_missing_fields(&repair.draft.effective_document());
 
     Ok(Json(RepairDraftResponse {
         case: repair.case,
@@ -446,6 +520,7 @@ async fn get_document_requiring_fixing(
             pdf_hash: repair.pdf_hash,
             draft: repair.draft,
         },
+        missing_fields,
     }))
 }
 
@@ -666,6 +741,7 @@ mod tests {
         body::to_bytes,
         http::{Method, Request},
     };
+    use scepa::models::draft::{Bibliography, PassageLevel, TeiDocument};
     use serde_json::{Value, json};
     use tower::ServiceExt;
 
@@ -725,6 +801,41 @@ mod tests {
             )
             .await;
         }
+    }
+
+    #[tokio::test]
+    async fn upload_validation_response_survives_http_error_normalization() {
+        let draft = DraftDocument::new(TeiDocument {
+            id: String::new(),
+            level: PassageLevel::Paragraph,
+            bibliography: Bibliography::default(),
+            body_text: Vec::new(),
+            figures_and_tables: Vec::new(),
+        });
+
+        let response =
+            document_validation_response("upload:workflow-1", 42, "a".repeat(64), &draft).unwrap();
+        assert_eq!(response.code, "document_validation_failed");
+        assert_eq!(response.workflow_id, "upload:workflow-1");
+        assert_eq!(response.review_case_id, 42);
+        assert_eq!(
+            response
+                .missing_fields
+                .iter()
+                .map(|field| field.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["bibliography.title", "bibliography.authors"]
+        );
+
+        let mut http_response = (StatusCode::UNPROCESSABLE_ENTITY, Json(response)).into_response();
+        http_response.extensions_mut().insert(StructuredApiError);
+        let normalized = normalize_framework_error(http_response);
+        assert_eq!(normalized.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = to_bytes(normalized.into_body(), usize::MAX).await.unwrap();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["code"], "document_validation_failed");
+        assert_eq!(body["review_case_id"], 42);
+        assert_eq!(body["missing_fields"].as_array().unwrap().len(), 2);
     }
 
     #[tokio::test]
@@ -878,6 +989,8 @@ mod tests {
             ("UpdateDocumentWorkflowResponse", "changes"),
             ("ResearchPaper", "doi"),
             ("CanonicalUpdateSummary", "contributors_inserted"),
+            ("CanonicalMissingField", "path"),
+            ("DocumentValidationErrorResponse", "missing_fields"),
         ] {
             assert!(
                 schemas[name]["properties"].get(property).is_some(),
@@ -919,6 +1032,11 @@ mod tests {
                 .is_some(),
             "the API error schema must expose a human-readable error message"
         );
+        assert_eq!(
+            document["paths"]["/pdfs"]["post"]["responses"]["422"]["content"]["application/json"]["schema"]
+                ["$ref"],
+            "#/components/schemas/DocumentValidationErrorResponse"
+        );
 
         for (path, method) in [
             ("/pdfs", "post"),
@@ -949,10 +1067,16 @@ mod tests {
                         content.get("application/json").is_some(),
                         "error response {status} is not documented as JSON: {content}"
                     );
-                    assert_eq!(
-                        content["application/json"]["schema"]["$ref"],
-                        "#/components/schemas/ErrorResponse",
-                        "error response {status} does not use ErrorResponse"
+                    let schema = content["application/json"]["schema"]["$ref"]
+                        .as_str()
+                        .unwrap_or_default();
+                    assert!(
+                        matches!(
+                            schema,
+                            "#/components/schemas/ErrorResponse"
+                                | "#/components/schemas/DocumentValidationErrorResponse"
+                        ),
+                        "error response {status} uses an unexpected schema: {schema}"
                     );
                 }
             }

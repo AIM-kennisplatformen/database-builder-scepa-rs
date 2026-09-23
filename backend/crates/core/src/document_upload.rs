@@ -15,19 +15,35 @@ pub struct ReviewedUpload {
     pub result: NewDocumentWorkflowResponse,
 }
 
+#[derive(Debug)]
+pub struct FailedUpload {
+    pub workflow_id: String,
+    pub source: std::io::Error,
+}
+
 impl DocumentUpload {
     pub fn new(pdfs: GaragePipelineService, restate: RestateClient) -> Self {
         Self { pdfs, restate }
     }
 
     /// Stores a PDF and runs the complete new-document workflow.
-    pub async fn run(&self, pdf: Vec<u8>) -> std::io::Result<ReviewedUpload> {
+    pub async fn run(&self, pdf: Vec<u8>) -> Result<ReviewedUpload, FailedUpload> {
         let workflow_id = format!("upload:{}", uuid::Uuid::new_v4());
-        let stored = self.store(&workflow_id, &pdf).await?;
+        let stored = self
+            .store(&workflow_id, &pdf)
+            .await
+            .map_err(|source| FailedUpload {
+                workflow_id: workflow_id.clone(),
+                source,
+            })?;
         let result = self
             .restate
             .run_new_document(&workflow_id, stored.pdf_hash)
-            .await?;
+            .await
+            .map_err(|source| FailedUpload {
+                workflow_id: workflow_id.clone(),
+                source,
+            })?;
         Ok(ReviewedUpload {
             workflow_id,
             result,

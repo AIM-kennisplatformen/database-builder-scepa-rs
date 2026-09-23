@@ -435,6 +435,43 @@ impl PostgresReviewStore {
         .await?)
     }
 
+    /// Returns the pending review case produced by one workflow phase.
+    pub async fn get_pending_case_for_workflow(
+        &self,
+        workflow_id: &str,
+        service: &str,
+        phase: &str,
+    ) -> eros::Result<Option<ReviewCase>> {
+        Ok(sqlx::query_as::<_, ReviewCase>(
+            r#"
+            SELECT
+                id,
+                workflow_id,
+                pdf_hash,
+                service,
+                phase,
+                retryable,
+                error_message,
+                artifact_content_type,
+                octet_length(artifact_bytes) AS artifact_size,
+                status,
+                resolution,
+                created_at::text AS created_at,
+                resolved_at::text AS resolved_at
+            FROM review_cases
+            WHERE workflow_id = $1
+              AND service = $2
+              AND phase = $3
+              AND status = 'pending'
+            "#,
+        )
+        .bind(workflow_id)
+        .bind(service)
+        .bind(phase)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
     /// Loads the content type and bytes for a review artifact.
     pub async fn get_artifact(&self, id: i64) -> eros::Result<Option<(String, Vec<u8>)>> {
         Ok(sqlx::query_as(

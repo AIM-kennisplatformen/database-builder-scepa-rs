@@ -266,6 +266,7 @@ export default function UpdateDocumentPage({}) {
     publication_event_id: null,
   });
   const [bibliographyFieldErrors, setBibliographyFieldErrors] = useState({});
+  const [missingFields, setMissingFields] = useState([]);
   const [contributorsFieldsData, setContributorsFieldsData] = useState([
     createBlankContributor(),
   ]);
@@ -307,7 +308,11 @@ export default function UpdateDocumentPage({}) {
   function loadFixingDocument() {
     fetchJson(`/api/documents/requiring-fixing/${pdf_hash}`)
       .then((res) =>
-        applyDocument({ artifact: res.draft, pdfHash: res.draft.pdf_hash }),
+        applyDocument({
+          artifact: res.draft,
+          pdfHash: res.draft.pdf_hash,
+          missingFields: res.missing_fields ?? [],
+        }),
       )
       .catch((err) => toast.error(err.message));
   }
@@ -316,6 +321,18 @@ export default function UpdateDocumentPage({}) {
   // so everything below is shared.
   function applyDocument(document) {
     setDocumentData(document);
+    const requiredFields = document.missingFields ?? [];
+    setMissingFields(requiredFields);
+    if (requiredFields.some((field) => field.path === "bibliography.title")) {
+      setBibliographyFieldErrors((prev) => ({ ...prev, title: true }));
+    }
+    if (
+      requiredFields.some((field) =>
+        field.path.startsWith("bibliography.authors"),
+      )
+    ) {
+      setIsAuthorsOpen(true);
+    }
 
     const bibliography = effectiveBibliography(document.artifact);
 
@@ -330,18 +347,19 @@ export default function UpdateDocumentPage({}) {
         publication_event_id: bibliography.publication_event_id,
       });
 
+      const contributors = bibliography.authors.map((author) => ({
+        _key: author.id || crypto.randomUUID(),
+        id: author.id ?? "",
+        contribution_id: author.contribution_id ?? "",
+        name: author.name,
+        forename: author.forename,
+        surname: author.surname,
+        affiliation: author.affiliation ?? null,
+        role: author.role,
+        isOpen: false,
+      }));
       setContributorsFieldsData(
-        bibliography.authors.map((author) => ({
-          _key: author.id || crypto.randomUUID(),
-          id: author.id ?? "",
-          contribution_id: author.contribution_id ?? "",
-          name: author.name,
-          forename: author.forename,
-          surname: author.surname,
-          affiliation: author.affiliation ?? null,
-          role: author.role,
-          isOpen: false,
-        })),
+        contributors.length > 0 ? contributors : [createBlankContributor()],
       );
     }
   }
@@ -414,10 +432,40 @@ export default function UpdateDocumentPage({}) {
       return;
     }
 
-    //sanitize the data arrays
+    const sanitizedBibliography = sanitizeBibliography(bibliographyFieldsData);
+    const sanitizedContributors = contributorsFieldsData
+      .map(sanitizeContributor)
+      .filter(Boolean);
+    const requiredIssues = [];
+    if (!sanitizedBibliography.title) {
+      requiredIssues.push({
+        path: "bibliography.title",
+        message: "Title is required",
+      });
+      setBibliographyFieldErrors((prev) => ({ ...prev, title: true }));
+    }
+    if (sanitizedContributors.length === 0) {
+      requiredIssues.push({
+        path: "bibliography.authors",
+        message: "At least one contributor is required",
+      });
+      setIsAuthorsOpen(true);
+    }
+    if (requiredIssues.length > 0) {
+      setMissingFields((prev) => [
+        ...prev.filter(
+          (field) =>
+            !requiredIssues.some((required) => required.path === field.path),
+        ),
+        ...requiredIssues,
+      ]);
+      toast.error("Please supply the required document fields.");
+      return;
+    }
+
     const bibliography = {
-      ...sanitizeBibliography(bibliographyFieldsData),
-      authors: contributorsFieldsData.map(sanitizeContributor).filter(Boolean),
+      ...sanitizedBibliography,
+      authors: sanitizedContributors,
     };
 
     setIsSaving(true);
@@ -452,7 +500,19 @@ export default function UpdateDocumentPage({}) {
         {pdfHash && <PdfViewer file={`/api/pdfs/${pdfHash}`} />}
       </div>
       <div className="w-1/3 h-full overflow-y-auto bg-white p-2 text-black">
-        {/* {error && <p className="text-destructive">{error}</p>} */}
+        {missingFields.length > 0 && (
+          <div
+            className="mb-4 rounded border border-red-300 bg-red-50 p-3 text-red-800"
+            role="alert"
+          >
+            <p className="font-semibold">Document requires correction</p>
+            <ul className="mt-1 list-disc pl-5 text-sm">
+              {missingFields.map((field) => (
+                <li key={field.path}>{field.message}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         {bibliography && (
           <div className="flex flex-col gap-6">
             <div className="flex flex-col gap-4">
@@ -487,6 +547,14 @@ export default function UpdateDocumentPage({}) {
                             ...prev,
                             [field.key]: !isValidField(value, field.regex),
                           }));
+                          if (field.key === "title" && value.trim()) {
+                            setMissingFields((prev) =>
+                              prev.filter(
+                                (missing) =>
+                                  missing.path !== "bibliography.title",
+                              ),
+                            );
+                          }
                         }}
                         aria-invalid={
                           bibliographyFieldErrors[field.key] || undefined
@@ -500,7 +568,13 @@ export default function UpdateDocumentPage({}) {
                       />
                       {bibliographyFieldErrors[field.key] && (
                         <span className="text-xs text-red-500">
-                          Invalid format for {field.label.toLowerCase()}.
+                          {field.key === "title" &&
+                          missingFields.some(
+                            (missing) =>
+                              missing.path === "bibliography.title",
+                          )
+                            ? "Title is required."
+                            : `Invalid format for ${field.label.toLowerCase()}.`}
                         </span>
                       )}
                     </label>
@@ -525,19 +599,39 @@ export default function UpdateDocumentPage({}) {
                   <span className="font-medium text-sm text-primary">
                     Authors
                   </span>
-                  {contributorsFieldsData.map((author) => (
+                  {contributorsFieldsData.map((author, index) => (
                     <AuthorDisplay
                       key={author._key}
                       author={author}
-                      onChange={(field, value) =>
+                      missingName={missingFields.some(
+                        (missing) =>
+                          missing.path ===
+                            `bibliography.authors[${index}].name` ||
+                          (missing.path === "bibliography.authors" &&
+                            !sanitizeContributor(author)),
+                      )}
+                      onChange={(field, value) => {
                         setContributorsFieldsData((prev) =>
                           prev.map((a) =>
                             a._key === author._key
                               ? applyAuthorFieldChange(a, field, value)
                               : a,
                           ),
-                        )
-                      }
+                        );
+                        if (
+                          (field === "forename" || field === "surname") &&
+                          value.trim()
+                        ) {
+                          setMissingFields((prev) =>
+                            prev.filter(
+                              (missing) =>
+                                missing.path !==
+                                  `bibliography.authors[${index}].name` &&
+                                missing.path !== "bibliography.authors",
+                            ),
+                          );
+                        }
+                      }}
                       onDelete={() =>
                         setContributorsFieldsData((prev) =>
                           prev.filter((a) => a._key !== author._key),
@@ -552,6 +646,12 @@ export default function UpdateDocumentPage({}) {
                         ...prev,
                         createBlankContributor(),
                       ]);
+                      setMissingFields((prev) =>
+                        prev.filter(
+                          (missing) =>
+                            missing.path !== "bibliography.authors",
+                        ),
+                      );
                     }}
                   >
                     <Plus className="text-primary text-center" />

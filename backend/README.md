@@ -120,7 +120,9 @@ Use a different identifier to start another explicitly named submission.
 Identity conflicts return HTTP `409` with the existing `{"error":"…"}` body:
 workflow/PDF mismatches, duplicate records, canonical key/uniqueness conflicts,
 and duplicate passage identities. These are terminal workflow failures, not
-transient errors to retry. Other upstream failures continue to return `502`.
+transient errors to retry. Synchronous uploads whose extracted drafts are missing
+canonical fields return `422` with the pending review-case ID and all missing
+field paths. Other upstream failures continue to return `502`.
 An accepted asynchronous submission can still fail later; its `202` response
 only confirms acceptance, not successful publication.
 
