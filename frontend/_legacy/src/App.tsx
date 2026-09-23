@@ -55,7 +55,6 @@ type Passage = {
   coordinates: BoundingBox[];
   heading_context?: string | null;
   section?: string | null;
-  references?: unknown[];
   label?: string | null;
 };
 type AbstractPassage = Omit<Passage, "type">;
@@ -67,7 +66,6 @@ type TeiDocument = {
   bibliography: Bibliography;
   body_text: Passage[];
   figures_and_tables: unknown[];
-  references: unknown[];
 };
 type ManualBibliography = {
   title?: string;
@@ -813,7 +811,6 @@ function SourceReview({
         coordinates: passage.coordinates,
         heading_context: passage.heading_context,
         section: passage.section,
-        references: passage.references || [],
       };
       onChange(
         abstractPassages.filter((row) => row.id !== passage.id),
@@ -826,7 +823,6 @@ function SourceReview({
         coordinates: passage.coordinates,
         heading_context: passage.heading_context,
         section: passage.section,
-        references: passage.references || [],
       };
       onChange(
         [...abstractPassages, moved],
@@ -858,7 +854,6 @@ function SourceReview({
         id,
         text: "",
         coordinates: [],
-        references: [],
         heading_context: null,
         section: null,
       },
@@ -999,7 +994,6 @@ function SourceReview({
                   onChange={(event) =>
                     updatePassage(passage, {
                       text: event.target.value,
-                      references: [],
                     })
                   }
                 />
