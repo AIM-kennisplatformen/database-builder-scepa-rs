@@ -1,29 +1,40 @@
 # syntax=docker/dockerfile:1
 
-FROM rust:1.97-bookworm AS development
+FROM lukemathwalker/cargo-chef:0.1.78-rust-1.97-bookworm AS chef
+
+WORKDIR /app
+
+FROM chef AS planner
+
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS development
 
 RUN cargo install cargo-watch --locked
 
-WORKDIR /app
-COPY Cargo.toml Cargo.lock ./
-COPY crates ./crates
+COPY --from=planner /app/recipe.json recipe.json
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo fetch --locked
+    cargo chef cook --locked --package scepa-api --recipe-path recipe.json
+
+COPY . .
 
 EXPOSE 3000 9080
 
 CMD ["cargo", "watch", "--watch", "crates", "--watch", "Cargo.toml", "--watch", "Cargo.lock", "--exec", "run --package scepa-api"]
 
-FROM rust:1.97-bookworm AS builder
+FROM chef AS builder
 
-WORKDIR /app
-COPY Cargo.toml Cargo.lock ./
-COPY crates ./crates
+COPY --from=planner /app/recipe.json recipe.json
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,target=/app/target,sharing=locked \
+    cargo chef cook --locked --release --package scepa-api --recipe-path recipe.json
+
+COPY . .
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     cargo build --locked --release --package scepa-api \
     && cp target/release/scepa-api /usr/local/bin/scepa-api
 
