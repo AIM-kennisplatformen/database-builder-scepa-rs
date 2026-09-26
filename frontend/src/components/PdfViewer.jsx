@@ -76,10 +76,7 @@ export default function PdfViewer({ file }) {
             className="flex justify-center"
           >
             {pageWidth ? (
-              <Page
-                pageNumber={pageNumber}
-                width={pageWidth * scale}
-              />
+              <Page pageNumber={pageNumber} width={pageWidth * scale} />
             ) : null}
           </Document>
         </div>
@@ -103,23 +100,6 @@ export default function PdfViewer({ file }) {
             >
               <ChevronRight className="size-4" />
             </button>
-            {/* <button
-              onClick={zoomOut}
-              disabled={scale <= MIN_SCALE}
-              className="rounded p-1 hover:bg-muted/50 disabled:opacity-40"
-            >
-              <ZoomOut className="size-4" />
-            </button>
-            <span className="text-muted-foreground w-12 text-center">
-              {Math.round(scale * 100)}%
-            </span>
-            <button
-              onClick={zoomIn}
-              disabled={scale >= MAX_SCALE}
-              className="rounded p-1 hover:bg-muted/50 disabled:opacity-40"
-            >
-              <ZoomIn className="size-4" />
-            </button> */}
           </div>
         </div>
       </div>
