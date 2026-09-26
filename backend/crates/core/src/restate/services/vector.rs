@@ -63,8 +63,11 @@ impl VectorRestateService {
 }
 
 fn to_handler_error(error: VectorPipelineError) -> HandlerError {
-    if error.is_terminal() {
-        TerminalError::new(error.to_string()).into()
+    if matches!(error, VectorPipelineError::DuplicateIdentity { .. }) {
+        crate::conflict::Conflict::PassageIdentity.terminal().into()
+    } else if error.is_terminal() {
+        tracing::error!(error = %error, "terminal vector pipeline failure");
+        TerminalError::new_with_code(500, "Document indexing failed").into()
     } else {
         std::io::Error::other(error.to_string()).into()
     }

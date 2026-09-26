@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::{FromRow, PgPool, Row, postgres::PgPoolOptions};
 
 use crate::models::draft::{
     Bibliography, DraftDocument, ManualDocument, PassageLevel, TeiDocument,
@@ -34,7 +34,6 @@ pub struct PublishedDocument {
 pub struct PublishedDocumentSummary {
     pub pdf_hash: String,
     pub title: Option<String>,
-    pub identifiers: Vec<crate::models::draft::Identifier>,
     pub published_at: String,
 }
 
@@ -65,6 +64,39 @@ pub struct ReviewCase {
     pub resolution: Option<serde_json::Value>,
     pub created_at: String,
     pub resolved_at: Option<String>,
+}
+
+/// Pending review case with the document fields used by the document picker.
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct ReviewCaseDocumentSummary {
+    #[serde(flatten)]
+    pub case: ReviewCase,
+    pub title: Option<String>,
+    pub published_at: Option<String>,
+}
+
+impl ReviewCaseDocumentSummary {
+    fn from_artifacts(
+        case: ReviewCase,
+        draft: Option<serde_json::Value>,
+        published: Option<serde_json::Value>,
+        published_at: Option<String>,
+    ) -> eros::Result<Self> {
+        let artifact = draft.or(published);
+        let title = match artifact {
+            Some(value) => {
+                let artifact: DraftDocument = serde_json::from_value(value)?;
+                artifact.effective_document().bibliography.title
+            }
+            None => None,
+        };
+
+        Ok(Self {
+            case,
+            title,
+            published_at,
+        })
+    }
 }
 
 impl PostgresReviewStore {
@@ -310,7 +342,6 @@ impl PostgresReviewStore {
                 Ok(PublishedDocumentSummary {
                     pdf_hash,
                     title: effective.bibliography.title,
-                    identifiers: effective.bibliography.identifiers,
                     published_at,
                 })
             })
@@ -373,30 +404,47 @@ impl PostgresReviewStore {
     ///
     /// Unlike the paginated operator queue, this intentionally has no limit:
     /// it backs the document picker and must not silently omit older failures.
-    pub async fn list_documents_requiring_fixing(&self) -> eros::Result<Vec<ReviewCase>> {
-        Ok(sqlx::query_as::<_, ReviewCase>(
+    pub async fn list_documents_requiring_fixing(
+        &self,
+    ) -> eros::Result<Vec<ReviewCaseDocumentSummary>> {
+        let rows = sqlx::query(
             r#"
             SELECT
-                id,
-                workflow_id,
-                pdf_hash,
-                service,
-                phase,
-                retryable,
-                error_message,
-                artifact_content_type,
-                octet_length(artifact_bytes) AS artifact_size,
-                status,
-                resolution,
-                created_at::text AS created_at,
-                resolved_at::text AS resolved_at
-            FROM review_cases
-            WHERE status = 'pending'
-            ORDER BY created_at DESC
+                review.id,
+                review.workflow_id,
+                review.pdf_hash,
+                review.service,
+                review.phase,
+                review.retryable,
+                review.error_message,
+                review.artifact_content_type,
+                octet_length(review.artifact_bytes) AS artifact_size,
+                review.status,
+                review.resolution,
+                review.created_at::text AS created_at,
+                review.resolved_at::text AS resolved_at,
+                document.draft_artifact,
+                document.published_artifact,
+                document.published_at::text AS published_at
+            FROM review_cases AS review
+            LEFT JOIN document_artifacts AS document ON document.pdf_hash = review.pdf_hash
+            WHERE review.status = 'pending'
+            ORDER BY review.created_at DESC
             "#,
         )
         .fetch_all(&self.pool)
-        .await?)
+        .await?;
+
+        rows.iter()
+            .map(|row| {
+                ReviewCaseDocumentSummary::from_artifacts(
+                    ReviewCase::from_row(row)?,
+                    row.try_get("draft_artifact")?,
+                    row.try_get("published_artifact")?,
+                    row.try_get("published_at")?,
+                )
+            })
+            .collect()
     }
 
     /// Counts review cases that are waiting for an operator decision.
@@ -431,6 +479,75 @@ impl PostgresReviewStore {
             "#,
         )
         .bind(id)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
+    /// Returns the pending review case produced by one workflow phase.
+    pub async fn get_pending_case_for_workflow(
+        &self,
+        workflow_id: &str,
+        service: &str,
+        phase: &str,
+    ) -> eros::Result<Option<ReviewCase>> {
+        Ok(sqlx::query_as::<_, ReviewCase>(
+            r#"
+            SELECT
+                id,
+                workflow_id,
+                pdf_hash,
+                service,
+                phase,
+                retryable,
+                error_message,
+                artifact_content_type,
+                octet_length(artifact_bytes) AS artifact_size,
+                status,
+                resolution,
+                created_at::text AS created_at,
+                resolved_at::text AS resolved_at
+            FROM review_cases
+            WHERE workflow_id = $1
+              AND service = $2
+              AND phase = $3
+              AND status = 'pending'
+            "#,
+        )
+        .bind(workflow_id)
+        .bind(service)
+        .bind(phase)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
+    /// Returns the most recent pending review case produced by a workflow.
+    pub async fn get_latest_pending_case_for_workflow(
+        &self,
+        workflow_id: &str,
+    ) -> eros::Result<Option<ReviewCase>> {
+        Ok(sqlx::query_as::<_, ReviewCase>(
+            r#"
+            SELECT
+                id,
+                workflow_id,
+                pdf_hash,
+                service,
+                phase,
+                retryable,
+                error_message,
+                artifact_content_type,
+                octet_length(artifact_bytes) AS artifact_size,
+                status,
+                resolution,
+                created_at::text AS created_at,
+                resolved_at::text AS resolved_at
+            FROM review_cases
+            WHERE workflow_id = $1 AND status = 'pending'
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(workflow_id)
         .fetch_optional(&self.pool)
         .await?)
     }
@@ -568,5 +685,93 @@ impl DocumentArtifactStore for PostgresReviewStore {
         draft: &DraftDocument,
     ) -> eros::Result<()> {
         PostgresReviewStore::store_draft_artifact(self, pdf_hash, draft).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::draft::{Identifier, IdentifierKind, IdentifierScope};
+
+    fn review_case(pdf_hash: Option<String>) -> ReviewCase {
+        ReviewCase {
+            id: 7,
+            workflow_id: "workflow-7".into(),
+            pdf_hash,
+            service: "canonical".into(),
+            phase: "output_validation".into(),
+            retryable: false,
+            error_message: "Missing metadata".into(),
+            artifact_content_type: "application/json".into(),
+            artifact_size: 0,
+            status: "pending".into(),
+            resolution: None,
+            created_at: "2026-01-01 00:00:00+00".into(),
+            resolved_at: None,
+        }
+    }
+
+    fn draft(title: &str) -> DraftDocument {
+        let mut bibliography = Bibliography {
+            title: Some(title.into()),
+            ..Bibliography::default()
+        };
+        bibliography.identifiers.push(Identifier {
+            kind: IdentifierKind::Doi,
+            value: "10.1234/example".into(),
+            scope: IdentifierScope::Document,
+        });
+        DraftDocument::new(TeiDocument {
+            id: String::new(),
+            level: PassageLevel::Paragraph,
+            bibliography,
+            body_text: Vec::new(),
+            figures_and_tables: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn fixing_summary_uses_effective_draft_and_preserves_case_fields() {
+        let mut repair_draft = draft("Extracted title");
+        repair_draft.manual_data.bibliography.title = Some("Corrected title".into());
+        let summary = ReviewCaseDocumentSummary::from_artifacts(
+            review_case(Some("a".repeat(64))),
+            Some(serde_json::to_value(repair_draft).unwrap()),
+            Some(serde_json::to_value(draft("Published title")).unwrap()),
+            Some("2026-01-02 00:00:00+00".into()),
+        )
+        .unwrap();
+
+        let value = serde_json::to_value(summary).unwrap();
+        assert_eq!(value["id"], 7);
+        assert_eq!(value["workflow_id"], "workflow-7");
+        assert_eq!(value["title"], "Corrected title");
+        assert!(value.get("identifiers").is_none());
+        assert_eq!(value["published_at"], "2026-01-02 00:00:00+00");
+    }
+
+    #[test]
+    fn fixing_summary_falls_back_to_published_artifact_when_draft_is_missing() {
+        let summary = ReviewCaseDocumentSummary::from_artifacts(
+            review_case(Some("a".repeat(64))),
+            None,
+            Some(serde_json::to_value(draft("Published title")).unwrap()),
+            Some("2026-01-02 00:00:00+00".into()),
+        )
+        .unwrap();
+
+        assert_eq!(summary.title.as_deref(), Some("Published title"));
+    }
+
+    #[test]
+    fn fixing_summary_without_document_has_empty_optional_fields() {
+        let summary =
+            ReviewCaseDocumentSummary::from_artifacts(review_case(None), None, None, None).unwrap();
+        let value = serde_json::to_value(summary).unwrap();
+
+        assert!(value["title"].is_null());
+        assert!(value.get("identifiers").is_none());
+        assert!(value["published_at"].is_null());
+        assert!(value["pdf_hash"].is_null());
     }
 }

@@ -27,7 +27,7 @@ export default function CustomTable({
               key={index}
               className="border-b border-border last:border-0 hover:bg-muted/50"
             >
-              <td className="px-3 py-2 font-medium">
+              <td className="px-3 py-2 font-medium max-w-md">
                 {document.title ? document.title : "[Missing title]"}
               </td>
               <td className="px-3 py-2 ">

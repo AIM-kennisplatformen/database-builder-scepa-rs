@@ -30,39 +30,45 @@ export default function UploadDocumentPage() {
   async function handleFileUpload(file) {
     setUploading(true);
     setError("");
-    fetch("/api/pdfs", {
-      method: "POST",
-      headers: { "Content-Type": "application/pdf" },
-      body: file,
-    })
-      .then((response) =>
-        response.text().then((text) => {
-          let data;
-          try {
-            data = text ? JSON.parse(text) : null;
-          } catch {
-            throw Error("Invallid data structure");
-          }
-
-          if (!response.ok) {
-            throw Error(data?.error ?? "Failed to upload document");
-          }
-          if (!data) {
-            throw Error("Server returned an empty response");
-          }
-          return data;
-        }),
-      )
-      .then((data) => {
-        const pdf_hash = data.result.stored_pdf.pdf_hash;
-
-        setFile(null);
-        navigate(`/update/${pdf_hash}`);
-      })
-      .catch((err) => {
-        setUploading(false);
-        setError(err.message);
+    try {
+      const response = await fetch("/api/pdfs", {
+        method: "POST",
+        headers: { "Content-Type": "application/pdf" },
+        body: file,
       });
+      const text = await response.text();
+      let data;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        throw Error("Invalid data structure");
+      }
+
+      if (
+        response.status === 422 &&
+        data?.code === "document_validation_failed" &&
+        data?.review_case_id
+      ) {
+        setFile(null);
+        navigate(`/update/${data.review_case_id}?requiresFixing=true`, {
+          state: { validation: data },
+        });
+        return;
+      }
+      if (!response.ok) {
+        throw Error(data?.error ?? "Failed to upload document");
+      }
+      if (!data) {
+        throw Error("Server returned an empty response");
+      }
+
+      setFile(null);
+      navigate(`/update/${data.result.stored_pdf.pdf_hash}`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUploading(false);
+    }
   }
 
   return (

@@ -68,11 +68,15 @@ impl UpdateDocumentWorkflow {
                 .call()
                 .await?
                 .into_inner()
-                .ok_or_else(|| TerminalError::new("document artifact was not found"))?,
+                .ok_or_else(|| {
+                    TerminalError::new_with_code(404, "The document artifact could not be found")
+                })?,
         };
         let mut new_artifact = source_artifact;
         new_artifact.manual_data = request.manual_data;
-        new_artifact.validate_ids().map_err(TerminalError::new)?;
+        new_artifact
+            .validate_ids()
+            .map_err(|_| TerminalError::new_with_code(422, "Document identities are invalid"))?;
         ctx.service_client::<ArtifactRestateServiceClient>()
             .store_draft(Json(StoreArtifactRequest {
                 pdf_hash: request.pdf_hash.clone(),

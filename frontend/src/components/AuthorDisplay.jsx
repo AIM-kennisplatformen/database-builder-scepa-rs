@@ -10,9 +10,24 @@ const ROLE_OPTIONS = [
 ];
 
 export const AUTHOR_FIELDS = [
-  { key: "forename", label: "Forename", regex: TEXT_REGEX },
-  { key: "surname", label: "Surname", regex: TEXT_REGEX },
-  { key: "affiliation", label: "Affiliation", regex: TEXT_REGEX },
+  {
+    key: "forename",
+    label: "Forename*",
+    regex: TEXT_REGEX,
+    placeholder: "Forename",
+  },
+  {
+    key: "surname",
+    label: "Surname*",
+    regex: TEXT_REGEX,
+    placeholder: "Surname",
+  },
+  {
+    key: "affiliation",
+    label: "Affiliation",
+    regex: TEXT_REGEX,
+    placeholder: "Affiliation",
+  },
   {
     key: "role",
     label: "Role",
@@ -34,7 +49,12 @@ function stripAffiliationNumber(affiliation) {
   return affiliation?.replace(/^\s*\d+\s*/, "") ?? affiliation;
 }
 
-export default function AuthorDisplay({ author, onChange, onDelete }) {
+export default function AuthorDisplay({
+  author,
+  onChange,
+  onDelete,
+  missingName = false,
+}) {
   const [open, setOpen] = useState(author.isOpen);
   const [fieldErrors, setFieldErrors] = useState({});
 
@@ -77,6 +97,10 @@ export default function AuthorDisplay({ author, onChange, onDelete }) {
       {open && (
         <div className="p-2">
           {AUTHOR_FIELDS.map((field) => {
+            const requiredNameField =
+              missingName &&
+              (field.key === "forename" || field.key === "surname");
+            const hasError = fieldErrors[field.key] || requiredNameField;
             const value =
               field.type === "select"
                 ? (author[field.key] ?? field.options[0].value)
@@ -94,15 +118,13 @@ export default function AuthorDisplay({ author, onChange, onDelete }) {
                 {field.type === "select" ? (
                   <select
                     className={`bg-accent text-black rounded px-2 py-1 border ${
-                      fieldErrors[field.key]
-                        ? "border-red-500"
-                        : "border-border"
+                      hasError ? "border-red-500" : "border-border"
                     }`}
                     value={value}
                     onChange={(e) =>
                       handleChange(field.key, field.regex, e.target.value)
                     }
-                    aria-invalid={fieldErrors[field.key] || undefined}
+                    aria-invalid={hasError || undefined}
                   >
                     {field.options.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -113,20 +135,24 @@ export default function AuthorDisplay({ author, onChange, onDelete }) {
                 ) : (
                   <input
                     className={`bg-accent text-black rounded px-2 py-1 border ${
-                      fieldErrors[field.key]
-                        ? "border-red-500"
-                        : "border-border"
+                      hasError ? "border-red-500" : "border-border"
                     }`}
                     value={value}
                     onChange={(e) =>
                       handleChange(field.key, field.regex, e.target.value)
                     }
-                    aria-invalid={fieldErrors[field.key] || undefined}
+                    aria-invalid={hasError || undefined}
+                    placeholder={field.placeholder}
                   />
                 )}
                 {fieldErrors[field.key] && (
                   <span className="text-xs text-red-500">
                     Invalid format for {field.label.toLowerCase()}.
+                  </span>
+                )}
+                {requiredNameField && !fieldErrors[field.key] && (
+                  <span className="text-xs text-red-500">
+                    This field is required
                   </span>
                 )}
               </div>

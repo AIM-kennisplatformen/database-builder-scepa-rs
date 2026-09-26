@@ -33,6 +33,64 @@ pub struct CanonicalModel {
     pub publication_events: Vec<Arc<EPublicationEvent>>,
 }
 
+/// One required source value that is missing from a document before
+/// canonicalisation.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct CanonicalMissingField {
+    pub path: String,
+    pub message: String,
+}
+
+/// Returns every missing source value that an operator can supply through the
+/// document repair form.
+pub fn canonical_missing_fields(draft: &TeiDocument) -> Vec<CanonicalMissingField> {
+    let mut missing = Vec::new();
+
+    if non_empty(draft.bibliography.title.as_deref()).is_none() {
+        missing.push(CanonicalMissingField {
+            path: "bibliography.title".into(),
+            message: "Title is required".into(),
+        });
+    }
+
+    if draft.bibliography.authors.is_empty() {
+        missing.push(CanonicalMissingField {
+            path: "bibliography.authors".into(),
+            message: "At least one contributor is required".into(),
+        });
+    } else {
+        for (index, contributor) in draft.bibliography.authors.iter().enumerate() {
+            let has_name = non_empty(contributor.forename.as_deref()).is_some()
+                || non_empty(contributor.surname.as_deref()).is_some()
+                || non_empty(Some(&contributor.name)).is_some();
+            if !has_name {
+                missing.push(CanonicalMissingField {
+                    path: format!("bibliography.authors[{index}].name"),
+                    message: format!("Contributor {} requires a name", index + 1),
+                });
+            }
+        }
+    }
+
+    missing
+}
+
+fn validate_required_fields(draft: &TeiDocument) -> eros::Result<()> {
+    let missing = canonical_missing_fields(draft);
+    if !missing.is_empty() {
+        let paths = missing
+            .iter()
+            .map(|field| field.path.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        eros::bail!(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("canonical document is missing required fields: {paths}"),
+        ))
+    }
+    Ok(())
+}
+
 struct DocumentNode {
     entity: Arc<EDocument>,
     contribution_work: Arc<EDocument>,
@@ -98,6 +156,8 @@ impl CanonicalModel {
         {
             eros::bail!("PDF hash must be a lowercase SHA-256 digest")
         }
+
+        validate_required_fields(draft)?;
 
         let fallback_document_id = format!("sha256:{pdf_hash}");
         Self::from_draft(draft, Some(fallback_document_id), Some(pdf_hash.to_owned()))
@@ -293,6 +353,7 @@ impl TryFrom<&TeiDocument> for CanonicalModel {
     type Error = eros::ErrorUnion;
 
     fn try_from(draft: &TeiDocument) -> Result<Self, Self::Error> {
+        validate_required_fields(draft)?;
         Self::from_draft(draft, None, None)
     }
 }
@@ -466,6 +527,48 @@ mod tests {
     fn draft_without_required_canonical_fields_is_rejected() {
         assert!(CanonicalModel::try_from(&draft(None, vec![])).is_err());
         assert!(CanonicalModel::try_from(&draft(Some("A paper"), vec![])).is_err());
+    }
+
+    #[test]
+    fn missing_canonical_fields_are_reported_together() {
+        let mut invalid = draft(None, vec![]);
+        invalid.bibliography.authors.push(Contributor {
+            id: String::new(),
+            contribution_id: String::new(),
+            name: "  ".into(),
+            forename: None,
+            surname: Some(" ".into()),
+            affiliation: None,
+            role: ContributorRole::Author,
+        });
+
+        assert_eq!(
+            canonical_missing_fields(&invalid),
+            vec![
+                CanonicalMissingField {
+                    path: "bibliography.title".into(),
+                    message: "Title is required".into(),
+                },
+                CanonicalMissingField {
+                    path: "bibliography.authors[1].name".into(),
+                    message: "Contributor 2 requires a name".into(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_contributor_list_is_a_missing_field() {
+        let mut invalid = draft(Some("A paper"), vec![]);
+        invalid.bibliography.authors.clear();
+
+        assert_eq!(
+            canonical_missing_fields(&invalid),
+            vec![CanonicalMissingField {
+                path: "bibliography.authors".into(),
+                message: "At least one contributor is required".into(),
+            }]
+        );
     }
 
     #[test]

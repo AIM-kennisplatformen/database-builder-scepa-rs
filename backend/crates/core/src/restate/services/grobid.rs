@@ -38,7 +38,9 @@ impl GrobidRestateService {
             .load(&request.input)
             .await
             .map_err(|error| HandlerError::from(std::io::Error::other(error.to_string())))?
-            .ok_or_else(|| TerminalError::new(format!("PDF {} was not found", request.input)))?;
+            .ok_or_else(|| {
+                TerminalError::new_with_code(404, "The stored PDF could not be found")
+            })?;
         execute_pipeline(
             &self.pipeline,
             PipelineExecuteRequest::new(request.workflow_id, pdf),
