@@ -16,7 +16,9 @@ use scepa::{
         draft::{DraftDocument, ManualDocument},
     },
     pipeline::garage::GaragePipelineService,
-    postgres::{PostgresReviewStore, PublishedDocument, PublishedDocumentSummary},
+    postgres::{
+        PostgresReviewStore, PublishedDocument, PublishedDocumentSummary, ReviewCaseDocumentSummary,
+    },
     restate::{
         RestateClient, RestateError, RestateErrorKind,
         services::RepairDraft,
@@ -562,14 +564,14 @@ async fn list_documents(
     get,
     path = "/documents/requiring-fixing",
     responses(
-        (status = 200, description = "Pending review cases", body = Vec<scepa::postgres::ReviewCase>),
+        (status = 200, description = "Pending review cases with document summaries", body = Vec<ReviewCaseDocumentSummary>),
         (status = 500, description = "Persistence error", body = ErrorResponse)
     ),
     tag = "review"
 )]
 async fn list_documents_requiring_fixing(
     State(state): State<AppState>,
-) -> Result<Json<Vec<scepa::postgres::ReviewCase>>, ApiError> {
+) -> Result<Json<Vec<ReviewCaseDocumentSummary>>, ApiError> {
     Ok(Json(
         state
             .drafts
@@ -1346,7 +1348,6 @@ mod tests {
             ("Authorship", "contribution_id"),
             ("Affiliation", "affiliation_id"),
             ("Publication", "publication_event_id"),
-            ("PublishedDocumentSummary", "identifiers"),
             ("ReviewCase", "workflow_id"),
             ("CanonicalModel", "publication_events"),
             ("NewDocumentWorkflowResponse", "stored_pdf"),
@@ -1362,6 +1363,25 @@ mod tests {
                 schemas[name]
             );
         }
+
+        let published_summary = &schemas["PublishedDocumentSummary"]["properties"];
+        for field in ["pdf_hash", "title", "published_at"] {
+            assert!(
+                published_summary.get(field).is_some(),
+                "published summary is missing {field}: {published_summary}"
+            );
+        }
+        assert!(published_summary.get("identifiers").is_none());
+
+        let fixing_summary = &schemas["ReviewCaseDocumentSummary"]["allOf"];
+        assert_eq!(fixing_summary[0]["$ref"], "#/components/schemas/ReviewCase");
+        for field in ["title", "published_at"] {
+            assert!(
+                fixing_summary[1]["properties"].get(field).is_some(),
+                "fixing summary is missing {field}: {fixing_summary}"
+            );
+        }
+        assert!(fixing_summary[1]["properties"].get("identifiers").is_none());
 
         for path in [
             "/drafts/{pdf_hash}",
