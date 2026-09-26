@@ -41,7 +41,9 @@ impl FixDocumentWorkflow {
     ) -> HandlerResult<Json<FixDocumentWorkflowResponse>> {
         let request = request.into_inner();
         if request.enrich {
-            return Err(TerminalError::new("external enrichment is not available yet").into());
+            return Err(
+                TerminalError::new_with_code(422, "External enrichment is not available").into(),
+            );
         }
         let repair = ctx
             .service_client::<ArtifactRestateServiceClient>()

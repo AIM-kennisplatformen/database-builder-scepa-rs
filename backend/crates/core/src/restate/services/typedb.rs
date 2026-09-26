@@ -88,13 +88,17 @@ impl TypeDbRestateService {
                 let message = error.to_string();
                 self.stage_invalid(request.workflow_id, &request.document, message.clone())
                     .await?;
-                return Err(TerminalError::new(message).into());
+                return Err(TerminalError::new_with_code(
+                    422,
+                    "Document data is incomplete or invalid",
+                )
+                .into());
             }
         };
         self.service
             .execute(&canonical)
             .await
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
+            .map_err(to_postgres_handler_error)?;
         Ok(Json(canonical))
     }
 
@@ -109,7 +113,7 @@ impl TypeDbRestateService {
             .service
             .pre_validate_with_pdf_hash(&request.old_document, &request.pdf_hash)
             .await
-            .map_err(|error| TerminalError::new(error.to_string()))?;
+            .map_err(|_| TerminalError::new_with_code(422, "Existing document data is invalid"))?;
         let new = match self
             .service
             .pre_validate_with_pdf_hash(&request.new_document, &request.pdf_hash)
@@ -120,14 +124,18 @@ impl TypeDbRestateService {
                 let message = error.to_string();
                 self.stage_invalid(request.workflow_id, &request.new_document, message.clone())
                     .await?;
-                return Err(TerminalError::new(message).into());
+                return Err(TerminalError::new_with_code(
+                    422,
+                    "Document data is incomplete or invalid",
+                )
+                .into());
             }
         };
         let changes = self
             .service
             .execute_update(&old, &new)
             .await
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
+            .map_err(to_postgres_handler_error)?;
         Ok(Json(TypeDbUpdateResponse {
             canonical: new,
             changes,

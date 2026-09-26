@@ -1,5 +1,6 @@
 //! Core pipeline and persistence for SCEPA.
 
+pub mod conflict;
 pub mod document_upload;
 pub mod models;
 pub mod pipeline;

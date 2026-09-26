@@ -1,6 +1,6 @@
 pub mod model;
 
-pub use model::CanonicalModel;
+pub use model::{CanonicalMissingField, CanonicalModel, canonical_missing_fields};
 
 pub mod entities {
     pub mod document;

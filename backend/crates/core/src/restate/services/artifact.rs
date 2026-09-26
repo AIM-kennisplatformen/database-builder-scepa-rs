@@ -83,12 +83,13 @@ impl ArtifactRestateService {
             .get_case(case_id.into_inner())
             .await
             .map_err(to_postgres_handler_error)?
-            .filter(|case| case.status == "pending")
-            .ok_or_else(|| TerminalError::new("pending review case not found"))?;
-        let pdf_hash = case
-            .pdf_hash
-            .clone()
-            .ok_or_else(|| TerminalError::new("review case is not linked to a source PDF"))?;
+            .filter(|case| matches!(case.status.as_str(), "pending" | "resolved"))
+            .ok_or_else(|| {
+                TerminalError::new_with_code(404, "The review case could not be found")
+            })?;
+        let pdf_hash = case.pdf_hash.clone().ok_or_else(|| {
+            TerminalError::new_with_code(409, "The review case has no source PDF")
+        })?;
         let draft = self
             .store
             .get_repair_draft(&pdf_hash)
@@ -140,7 +141,11 @@ impl ArtifactRestateService {
             .await
             .map_err(to_postgres_handler_error)?;
         if !stored {
-            return Err(TerminalError::new("document artifact was not found").into());
+            return Err(TerminalError::new_with_code(
+                404,
+                "The document artifact could not be found",
+            )
+            .into());
         }
         Ok(())
     }
@@ -176,7 +181,11 @@ impl ArtifactRestateService {
                     case.workflow_id == request.workflow_id && case.status == "resolved"
                 });
             if !already_resolved {
-                return Err(TerminalError::new("review case was already resolved").into());
+                return Err(TerminalError::new_with_code(
+                    409,
+                    "The review case cannot be resolved by this workflow",
+                )
+                .into());
             }
         }
         Ok(())
