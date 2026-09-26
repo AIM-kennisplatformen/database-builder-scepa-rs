@@ -608,12 +608,12 @@ export default function UpdateDocumentPage({}) {
                     isAuthorsOpen ? "" : "-rotate-90"
                   }`}
                 />
-                <h3 className="text-primary font-bold">Authors</h3>
+                <h3 className="text-primary font-bold">Contributers</h3>
               </div>
               {isAuthorsOpen && (
                 <>
                   <span className="font-medium text-sm text-primary">
-                    Authors
+                    Contributers
                   </span>
                   {contributorsFieldsData.map((author, index) => (
                     <AuthorDisplay
