@@ -10,9 +10,24 @@ const ROLE_OPTIONS = [
 ];
 
 export const AUTHOR_FIELDS = [
-  { key: "forename", label: "Forename", regex: TEXT_REGEX },
-  { key: "surname", label: "Surname", regex: TEXT_REGEX },
-  { key: "affiliation", label: "Affiliation", regex: TEXT_REGEX },
+  {
+    key: "forename",
+    label: "Forename*",
+    regex: TEXT_REGEX,
+    placeholder: "Forename",
+  },
+  {
+    key: "surname",
+    label: "Surname*",
+    regex: TEXT_REGEX,
+    placeholder: "Surname",
+  },
+  {
+    key: "affiliation",
+    label: "Affiliation",
+    regex: TEXT_REGEX,
+    placeholder: "Affiliation",
+  },
   {
     key: "role",
     label: "Role",
@@ -83,7 +98,8 @@ export default function AuthorDisplay({
         <div className="p-2">
           {AUTHOR_FIELDS.map((field) => {
             const requiredNameField =
-              missingName && (field.key === "forename" || field.key === "surname");
+              missingName &&
+              (field.key === "forename" || field.key === "surname");
             const hasError = fieldErrors[field.key] || requiredNameField;
             const value =
               field.type === "select"
@@ -102,9 +118,7 @@ export default function AuthorDisplay({
                 {field.type === "select" ? (
                   <select
                     className={`bg-accent text-black rounded px-2 py-1 border ${
-                      hasError
-                        ? "border-red-500"
-                        : "border-border"
+                      hasError ? "border-red-500" : "border-border"
                     }`}
                     value={value}
                     onChange={(e) =>
@@ -121,15 +135,14 @@ export default function AuthorDisplay({
                 ) : (
                   <input
                     className={`bg-accent text-black rounded px-2 py-1 border ${
-                      hasError
-                        ? "border-red-500"
-                        : "border-border"
+                      hasError ? "border-red-500" : "border-border"
                     }`}
                     value={value}
                     onChange={(e) =>
                       handleChange(field.key, field.regex, e.target.value)
                     }
                     aria-invalid={hasError || undefined}
+                    placeholder={field.placeholder}
                   />
                 )}
                 {fieldErrors[field.key] && (
@@ -139,7 +152,7 @@ export default function AuthorDisplay({
                 )}
                 {requiredNameField && !fieldErrors[field.key] && (
                   <span className="text-xs text-red-500">
-                    Enter a forename or surname.
+                    This field is required
                   </span>
                 )}
               </div>

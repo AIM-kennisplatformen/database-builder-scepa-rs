@@ -413,9 +413,9 @@ export default function UpdateDocumentPage({}) {
     ) {
       toast.error(
         <span>
-          There is no data to save. <br />
+          There is no data to save <br />
           <em className="text-sm text-red-400">
-            Provide at least a valid title and one author
+            One or more required fields is missing
           </em>
         </span>,
       );
@@ -469,7 +469,14 @@ export default function UpdateDocumentPage({}) {
         ),
         ...requiredIssues,
       ]);
-      toast.error("Please supply the required document fields.");
+      toast.error(
+        <span>
+          Document failed to save <br />
+          <em className="text-sm text-red-400">
+            One or more required fields is missing
+          </em>
+        </span>,
+      );
       return;
     }
 
@@ -515,7 +522,7 @@ export default function UpdateDocumentPage({}) {
             className="mb-4 rounded border border-red-300 bg-red-50 p-3 text-red-800"
             role="alert"
           >
-            <p className="font-semibold">Document requires correction</p>
+            <p className="font-semibold">Document requires attention</p>
             <ul className="mt-1 list-disc pl-5 text-sm">
               {missingFields.map((field) => (
                 <li key={field.path}>{field.message}</li>
@@ -580,8 +587,7 @@ export default function UpdateDocumentPage({}) {
                         <span className="text-xs text-red-500">
                           {field.key === "title" &&
                           missingFields.some(
-                            (missing) =>
-                              missing.path === "bibliography.title",
+                            (missing) => missing.path === "bibliography.title",
                           )
                             ? "Title is required."
                             : `Invalid format for ${field.label.toLowerCase()}.`}
@@ -602,7 +608,7 @@ export default function UpdateDocumentPage({}) {
                     isAuthorsOpen ? "" : "-rotate-90"
                   }`}
                 />
-                <h3 className="text-primary font-bold">Authors*</h3>
+                <h3 className="text-primary font-bold">Authors</h3>
               </div>
               {isAuthorsOpen && (
                 <>
@@ -658,8 +664,7 @@ export default function UpdateDocumentPage({}) {
                       ]);
                       setMissingFields((prev) =>
                         prev.filter(
-                          (missing) =>
-                            missing.path !== "bibliography.authors",
+                          (missing) => missing.path !== "bibliography.authors",
                         ),
                       );
                     }}
