@@ -1,7 +1,6 @@
 import { ChevronDown, Loader2 } from "lucide-react";
 import AuthorDisplay from "../components/AuthorDisplay";
 import PdfViewer from "../components/PdfViewer";
-import UpdateDocumentList from "./UpdateDocumentListPage";
 import { useState, useEffect, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { TEXT_REGEX, isValidField } from "../utils/validation";
@@ -179,6 +178,7 @@ function createBlankContributor() {
     affiliation: null,
     role: null,
     isOpen: true,
+    errors: {},
   };
 }
 
@@ -357,6 +357,7 @@ export default function UpdateDocumentPage({}) {
         affiliation: author.affiliation ?? null,
         role: author.role,
         isOpen: false,
+        errors: {},
       }));
       setContributorsFieldsData(
         contributors.length > 0 ? contributors : [createBlankContributor()],
@@ -511,6 +512,8 @@ export default function UpdateDocumentPage({}) {
       .finally(() => setIsSaving(false));
   }
 
+  console.log(missingFields);
+
   return (
     <div className="flex h-screen w-full py-6 mt-1">
       <div className="w-2/3 h-full overflow-y-auto border-r border-border">
@@ -589,8 +592,8 @@ export default function UpdateDocumentPage({}) {
                           missingFields.some(
                             (missing) => missing.path === "bibliography.title",
                           )
-                            ? "Title is required."
-                            : `Invalid format for ${field.label.toLowerCase()}.`}
+                            ? "Title is required"
+                            : `Invalid format for ${field.label.toLowerCase()}`}
                         </span>
                       )}
                     </label>

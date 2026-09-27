@@ -56,14 +56,13 @@ export default function AuthorDisplay({
   missingName = false,
 }) {
   const [open, setOpen] = useState(author.isOpen);
-  const [fieldErrors, setFieldErrors] = useState({});
 
   function handleChange(field, regex, value) {
     onChange(field, value);
-    setFieldErrors((prev) => ({
-      ...prev,
+    onChange("errors", {
+      ...author.errors,
       [field]: !isValidField(value, regex),
-    }));
+    });
   }
 
   return (
@@ -100,7 +99,7 @@ export default function AuthorDisplay({
             const requiredNameField =
               missingName &&
               (field.key === "forename" || field.key === "surname");
-            const hasError = fieldErrors[field.key] || requiredNameField;
+            const hasError = author.errors?.[field.key] || requiredNameField;
             const value =
               field.type === "select"
                 ? (author[field.key] ?? field.options[0].value)
@@ -145,12 +144,12 @@ export default function AuthorDisplay({
                     placeholder={field.placeholder}
                   />
                 )}
-                {fieldErrors[field.key] && (
+                {author.errors?.[field.key] && (
                   <span className="text-xs text-red-500">
-                    Invalid format for {field.label.toLowerCase()}.
+                    Invalid format for {field.label.toLowerCase()}
                   </span>
                 )}
-                {requiredNameField && !fieldErrors[field.key] && (
+                {requiredNameField && !author.errors?.[field.key] && (
                   <span className="text-xs text-red-500">
                     This field is required
                   </span>
