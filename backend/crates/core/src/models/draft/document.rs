@@ -1,8 +1,10 @@
+use std::collections::{HashMap, HashSet};
+
 use serde::{Deserialize, Serialize};
 
+use super::identity::{is_uuid, stable_id};
 use crate::models::draft::{
     bibliography::{Bibliography, Contributor, Identifier},
-    citation::Citation,
     figure::FigureOrTable,
     passage::Passage,
 };
@@ -18,11 +20,12 @@ pub enum PassageLevel {
 /// A complete application-facing representation of a TEI document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, bon::Builder, utoipa::ToSchema)]
 pub struct TeiDocument {
+    #[serde(default)]
+    pub id: String,
     pub level: PassageLevel,
     pub bibliography: Bibliography,
     pub body_text: Vec<Passage>,
     pub figures_and_tables: Vec<FigureOrTable>,
-    pub references: Vec<Citation>,
 }
 
 /// An extraction draft together with sparse, operator-authored overrides.
@@ -76,6 +79,9 @@ impl DraftDocument {
         if let Some(value) = &manual.journal_abbreviation {
             effective.bibliography.journal_abbreviation = Some(value.clone());
         }
+        if let Some(value) = &manual.publication_event_id {
+            effective.bibliography.publication_event_id = Some(value.clone());
+        }
         if let Some(value) = &manual.abstract_text {
             effective.bibliography.abstract_text = value.clone();
         }
@@ -85,6 +91,345 @@ impl DraftDocument {
 
         effective
     }
+
+    pub fn assign_extracted_ids(&mut self, pdf_hash: &str) {
+        self.extracted_data.assign_extracted_ids(pdf_hash);
+    }
+
+    pub fn assign_manual_ids(&mut self, pdf_hash: &str, idempotency_key: &str) {
+        self.manual_data
+            .assign_missing_ids(pdf_hash, idempotency_key);
+    }
+
+    pub fn validate_ids(&self) -> Result<(), String> {
+        self.extracted_data.validate_ids()?;
+        let effective = self.effective_document();
+        effective.validate_ids()
+    }
+}
+
+impl TeiDocument {
+    pub fn assign_extracted_ids(&mut self, pdf_hash: &str) {
+        let scope = format!("pdf:{pdf_hash}");
+        self.id = stable_id(&scope, "document", "root");
+
+        assign_bibliography_ids(&mut self.bibliography, &scope, "bibliography");
+
+        for passage in &mut self.body_text {
+            let (kind, id) = match passage {
+                Passage::Text(value) => ("text-passage", &mut value.id),
+                Passage::Formula(value) => ("formula-passage", &mut value.id),
+            };
+            if !is_uuid(id) {
+                let locator = id.clone();
+                *id = stable_id(&scope, kind, &locator);
+            }
+        }
+        for passage in &mut self.bibliography.abstract_text {
+            if !is_uuid(&passage.id) {
+                let locator = passage.id.clone();
+                passage.id = stable_id(&scope, "abstract-passage", &locator);
+            }
+        }
+        for media in &mut self.figures_and_tables {
+            let (kind, id) = match media {
+                crate::models::draft::FigureOrTable::Figure(value) => ("figure", &mut value.id),
+                crate::models::draft::FigureOrTable::Table(value) => ("table", &mut value.id),
+            };
+            if !is_uuid(id) {
+                let locator = id.clone();
+                *id = stable_id(&scope, kind, &locator);
+            }
+        }
+    }
+
+    pub fn validate_ids(&self) -> Result<(), String> {
+        let mut seen = HashSet::new();
+        validate_id(&self.id, "document", &mut seen)?;
+        validate_bibliography_ids(&self.bibliography, &mut seen)?;
+        for passage in &self.body_text {
+            let id = match passage {
+                Passage::Text(value) => &value.id,
+                Passage::Formula(value) => &value.id,
+            };
+            validate_id(id, "passage", &mut seen)?;
+        }
+        for passage in &self.bibliography.abstract_text {
+            validate_id(&passage.id, "abstract passage", &mut seen)?;
+        }
+        for media in &self.figures_and_tables {
+            let id = match media {
+                crate::models::draft::FigureOrTable::Figure(value) => &value.id,
+                crate::models::draft::FigureOrTable::Table(value) => &value.id,
+            };
+            validate_id(id, "media", &mut seen)?;
+        }
+        Ok(())
+    }
+}
+
+impl ManualDocument {
+    pub fn requires_identity_assignment(&self) -> bool {
+        self.bibliography
+            .authors
+            .as_ref()
+            .is_some_and(|authors| authors.iter().any(contributor_requires_ids))
+            || self
+                .bibliography
+                .publisher
+                .as_ref()
+                .is_some_and(|value| value.id.is_empty())
+            || self
+                .bibliography
+                .journal
+                .as_ref()
+                .is_some_and(|value| value.id.is_empty())
+            || ((self.bibliography.publication_date.is_some()
+                || self.bibliography.publication_year.is_some())
+                && self
+                    .bibliography
+                    .publication_event_id
+                    .as_deref()
+                    .unwrap_or_default()
+                    .is_empty())
+            || self.body_text.as_ref().is_some_and(|passages| {
+                passages.iter().any(|passage| match passage {
+                    Passage::Text(value) => value.id.is_empty(),
+                    Passage::Formula(value) => value.id.is_empty(),
+                })
+            })
+            || self
+                .bibliography
+                .abstract_text
+                .as_ref()
+                .is_some_and(|passages| passages.iter().any(|passage| passage.id.is_empty()))
+    }
+
+    pub fn assign_missing_ids(&mut self, pdf_hash: &str, idempotency_key: &str) {
+        let scope = format!("pdf:{pdf_hash}:request:{idempotency_key}");
+        if let Some(authors) = &mut self.bibliography.authors {
+            let mut organization_ids = HashMap::<String, String>::new();
+            for (index, contributor) in authors.iter_mut().enumerate() {
+                let organization_was_missing = contributor
+                    .affiliation
+                    .as_ref()
+                    .is_some_and(|value| value.organization.id.is_empty());
+                assign_contributor_ids(contributor, &scope, &format!("author:{}", index + 1));
+                if let Some(affiliation) = &mut contributor.affiliation {
+                    let key = normalize_identity_value(&affiliation.organization.name);
+                    if organization_was_missing {
+                        let id = organization_ids.entry(key).or_insert_with(|| {
+                            stable_id(
+                                &scope,
+                                "organization",
+                                &format!("affiliation:{}", index + 1),
+                            )
+                        });
+                        affiliation.organization.id = id.clone();
+                    } else {
+                        organization_ids
+                            .entry(key)
+                            .or_insert_with(|| affiliation.organization.id.clone());
+                    }
+                }
+            }
+        }
+        if let Some(publisher) = &mut self.bibliography.publisher
+            && publisher.id.is_empty()
+        {
+            publisher.id = stable_id(&scope, "organization", "publisher");
+        }
+        if let Some(journal) = &mut self.bibliography.journal
+            && journal.id.is_empty()
+        {
+            journal.id = stable_id(&scope, "publication-venue", "journal");
+        }
+        if (self.bibliography.publication_date.is_some()
+            || self.bibliography.publication_year.is_some())
+            && self
+                .bibliography
+                .publication_event_id
+                .as_deref()
+                .unwrap_or_default()
+                .is_empty()
+        {
+            self.bibliography.publication_event_id =
+                Some(stable_id(&scope, "publication-event", "publication"));
+        }
+        if let Some(passages) = &mut self.body_text {
+            for (index, passage) in passages.iter_mut().enumerate() {
+                let (kind, id) = match passage {
+                    Passage::Text(value) => ("text-passage", &mut value.id),
+                    Passage::Formula(value) => ("formula-passage", &mut value.id),
+                };
+                if id.is_empty() {
+                    *id = stable_id(&scope, kind, &format!("body:{}", index + 1));
+                }
+            }
+        }
+        if let Some(passages) = &mut self.bibliography.abstract_text {
+            for (index, passage) in passages.iter_mut().enumerate() {
+                if passage.id.is_empty() {
+                    passage.id = stable_id(
+                        &scope,
+                        "abstract-passage",
+                        &format!("abstract:{}", index + 1),
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn assign_bibliography_ids(bibliography: &mut Bibliography, scope: &str, locator: &str) {
+    let mut occurrences = HashMap::<String, usize>::new();
+    let mut organization_ids = HashMap::<String, String>::new();
+    for contributor in &mut bibliography.authors {
+        let fingerprint = contributor_fingerprint(contributor);
+        let occurrence = occurrences.entry(fingerprint.clone()).or_default();
+        *occurrence += 1;
+        assign_contributor_ids(
+            contributor,
+            scope,
+            &format!("{locator}:author:{fingerprint}:{}", *occurrence),
+        );
+        if let Some(affiliation) = &mut contributor.affiliation {
+            let normalized_name = normalize_identity_value(&affiliation.organization.name);
+            if affiliation.organization.id.is_empty() {
+                let organization_id = organization_ids
+                    .entry(normalized_name.clone())
+                    .or_insert_with(|| {
+                        stable_id(
+                            scope,
+                            "organization",
+                            &format!("{locator}:organization:{normalized_name}"),
+                        )
+                    });
+                affiliation.organization.id = organization_id.clone();
+            } else {
+                organization_ids
+                    .entry(normalized_name)
+                    .or_insert_with(|| affiliation.organization.id.clone());
+            }
+        }
+    }
+    if let Some(publisher) = &mut bibliography.publisher
+        && publisher.id.is_empty()
+    {
+        publisher.id = stable_id(scope, "organization", &format!("{locator}:publisher"));
+    }
+    if let Some(journal) = &mut bibliography.journal
+        && journal.id.is_empty()
+    {
+        journal.id = stable_id(scope, "publication-venue", &format!("{locator}:journal"));
+    }
+    if (bibliography.publication_date.is_some() || bibliography.publication_year.is_some())
+        && bibliography
+            .publication_event_id
+            .as_deref()
+            .unwrap_or_default()
+            .is_empty()
+    {
+        bibliography.publication_event_id = Some(stable_id(
+            scope,
+            "publication-event",
+            &format!("{locator}:publication"),
+        ));
+    }
+}
+
+fn contributor_fingerprint(contributor: &Contributor) -> String {
+    format!(
+        "{}|{}|{}|{}|{:?}",
+        normalize_identity_value(&contributor.name),
+        normalize_identity_value(contributor.forename.as_deref().unwrap_or_default()),
+        normalize_identity_value(contributor.surname.as_deref().unwrap_or_default()),
+        contributor
+            .affiliation
+            .as_ref()
+            .map(|value| normalize_identity_value(&value.organization.name))
+            .unwrap_or_default(),
+        contributor.role,
+    )
+}
+
+fn normalize_identity_value(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+fn assign_contributor_ids(contributor: &mut Contributor, scope: &str, locator: &str) {
+    if contributor.id.is_empty() {
+        contributor.id = stable_id(scope, "person", locator);
+    }
+    if contributor.contribution_id.is_empty() {
+        contributor.contribution_id = stable_id(scope, "contribution", locator);
+    }
+    if let Some(affiliation) = &mut contributor.affiliation {
+        if affiliation.id.is_empty() {
+            affiliation.id = stable_id(scope, "affiliation", locator);
+        }
+        if affiliation.organization.id.is_empty() {
+            affiliation.organization.id =
+                stable_id(scope, "organization", &format!("{locator}:organization"));
+        }
+    }
+}
+
+fn contributor_requires_ids(contributor: &Contributor) -> bool {
+    contributor.id.is_empty()
+        || contributor.contribution_id.is_empty()
+        || contributor
+            .affiliation
+            .as_ref()
+            .is_some_and(|value| value.id.is_empty() || value.organization.id.is_empty())
+}
+
+fn validate_bibliography_ids(
+    bibliography: &Bibliography,
+    seen: &mut HashSet<String>,
+) -> Result<(), String> {
+    for contributor in &bibliography.authors {
+        validate_contributor_ids(contributor, seen)?;
+    }
+    if let Some(value) = &bibliography.publisher {
+        validate_id(&value.id, "publisher", seen)?;
+    }
+    if let Some(value) = &bibliography.journal {
+        validate_id(&value.id, "publication venue", seen)?;
+    }
+    if let Some(value) = &bibliography.publication_event_id {
+        validate_id(value, "publication event", seen)?;
+    }
+    Ok(())
+}
+
+fn validate_contributor_ids(
+    contributor: &Contributor,
+    seen: &mut HashSet<String>,
+) -> Result<(), String> {
+    validate_id(&contributor.id, "contributor", seen)?;
+    validate_id(&contributor.contribution_id, "contribution", seen)?;
+    if let Some(value) = &contributor.affiliation {
+        validate_id(&value.id, "affiliation", seen)?;
+        if !is_uuid(&value.organization.id) {
+            return Err("affiliation organization ID is not a UUID".into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_id(value: &str, label: &str, seen: &mut HashSet<String>) -> Result<(), String> {
+    if !is_uuid(value) {
+        return Err(format!("{label} ID is not a UUID"));
+    }
+    if !seen.insert(value.to_owned()) {
+        return Err(format!("duplicate ID {value}"));
+    }
+    Ok(())
 }
 
 /// Human-authored values that may override extraction for canonicalisation.
@@ -116,11 +461,13 @@ pub struct ManualBibliography {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub publication_year: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub publisher: Option<String>,
+    pub publisher: Option<crate::models::draft::bibliography::DraftOrganization>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub journal: Option<String>,
+    pub journal: Option<crate::models::draft::bibliography::DraftPublicationVenue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub journal_abbreviation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publication_event_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub abstract_text: Option<Vec<crate::models::draft::passage::TextPassage>>,
 }
@@ -129,8 +476,21 @@ pub struct ManualBibliography {
 mod tests {
     use super::*;
 
+    fn contributor(name: &str) -> Contributor {
+        Contributor {
+            id: String::new(),
+            contribution_id: String::new(),
+            name: name.into(),
+            forename: Some(name.into()),
+            surname: Some("Example".into()),
+            affiliation: Some("Example University".into()),
+            role: crate::models::draft::ContributorRole::Author,
+        }
+    }
+
     fn extracted() -> TeiDocument {
         TeiDocument {
+            id: String::new(),
             level: PassageLevel::Paragraph,
             bibliography: Bibliography {
                 title: Some("Extracted title".into()),
@@ -138,7 +498,6 @@ mod tests {
             },
             body_text: vec![],
             figures_and_tables: vec![],
-            references: vec![],
         }
     }
 
@@ -151,6 +510,31 @@ mod tests {
             serde_json::json!({ "bibliography": {} })
         );
         assert!(value.get("extracted_data").is_none());
+    }
+
+    #[test]
+    fn legacy_citation_fields_are_ignored() {
+        let mut value = serde_json::to_value(extracted()).unwrap();
+        value["references"] = serde_json::json!([{ "title": "Prior work" }]);
+        value["body_text"] = serde_json::json!([{
+            "type": "text",
+            "id": "p1",
+            "text": "Body text",
+            "coordinates": [],
+            "references": [{
+                "target": "#b1",
+                "text": "[1]",
+                "byte_start": 5,
+                "byte_end": 8
+            }],
+            "heading_context": null,
+            "section": null
+        }]);
+
+        let document: TeiDocument = serde_json::from_value(value).unwrap();
+        let serialized = serde_json::to_value(document).unwrap();
+        assert!(serialized.get("references").is_none());
+        assert!(serialized["body_text"][0].get("references").is_none());
     }
 
     #[test]
@@ -172,6 +556,102 @@ mod tests {
         assert_eq!(
             draft.extracted_data.bibliography.title.as_deref(),
             Some("Extracted title")
+        );
+    }
+
+    #[test]
+    fn extracted_ids_are_deterministic_scoped_and_valid() {
+        let hash = "a".repeat(64);
+        let mut first = extracted();
+        first.bibliography.authors = vec![contributor("Ada"), contributor("Grace")];
+        first.bibliography.publication_date = Some("2024-05-06".into());
+        first.bibliography.publisher = Some("Example Press".into());
+        first.bibliography.journal = Some("Example Journal".into());
+        let mut second = first.clone();
+
+        first.assign_extracted_ids(&hash);
+        second.assign_extracted_ids(&hash);
+
+        assert_eq!(first, second);
+        let assigned = first.clone();
+        first.assign_extracted_ids(&hash);
+        assert_eq!(first, assigned);
+        first.validate_ids().unwrap();
+        assert_ne!(first.id, first.bibliography.authors[0].id);
+
+        let mut other_pdf = extracted();
+        other_pdf.bibliography.authors = vec![contributor("Ada"), contributor("Grace")];
+        other_pdf.bibliography.publication_date = Some("2024-05-06".into());
+        other_pdf.bibliography.publisher = Some("Example Press".into());
+        other_pdf.bibliography.journal = Some("Example Journal".into());
+        other_pdf.assign_extracted_ids(&"b".repeat(64));
+        assert_ne!(first.id, other_pdf.id);
+        assert_ne!(
+            first.bibliography.authors[0].id,
+            other_pdf.bibliography.authors[0].id
+        );
+    }
+
+    #[test]
+    fn contributor_ids_survive_edits_and_reordering() {
+        let mut document = extracted();
+        document.bibliography.authors = vec![contributor("Ada"), contributor("Grace")];
+        document.assign_extracted_ids(&"a".repeat(64));
+        let grace_id = document.bibliography.authors[1].id.clone();
+        let grace_contribution_id = document.bibliography.authors[1].contribution_id.clone();
+
+        document.bibliography.authors.reverse();
+        document.bibliography.authors[0].name = "Grace Hopper".into();
+
+        assert_eq!(document.bibliography.authors[0].id, grace_id);
+        assert_eq!(
+            document.bibliography.authors[0].contribution_id,
+            grace_contribution_id
+        );
+    }
+
+    #[test]
+    fn manual_creation_is_idempotent_but_new_keys_create_new_identity() {
+        let mut request = ManualDocument::default();
+        request.bibliography.authors = Some(vec![contributor("Ada")]);
+        assert!(request.requires_identity_assignment());
+
+        let mut retry = request.clone();
+        request.assign_missing_ids(&"a".repeat(64), "request-1");
+        retry.assign_missing_ids(&"a".repeat(64), "request-1");
+        assert_eq!(request, retry);
+        assert!(!request.requires_identity_assignment());
+
+        let mut recreated = ManualDocument::default();
+        recreated.bibliography.authors = Some(vec![contributor("Ada")]);
+        recreated.assign_missing_ids(&"a".repeat(64), "request-2");
+        assert_ne!(
+            request.bibliography.authors.as_ref().unwrap()[0].id,
+            recreated.bibliography.authors.as_ref().unwrap()[0].id
+        );
+    }
+
+    #[test]
+    fn invalid_and_duplicate_ids_are_rejected() {
+        let mut document = extracted();
+        document.bibliography.authors = vec![contributor("Ada")];
+        document.bibliography.authors[0].id.clear();
+        document.assign_extracted_ids(&"a".repeat(64));
+
+        document.bibliography.authors[0].id = "not-a-uuid".into();
+        assert_eq!(
+            document.validate_ids().unwrap_err(),
+            "contributor ID is not a UUID"
+        );
+
+        document.bibliography.authors[0].id.clear();
+        document.assign_extracted_ids(&"a".repeat(64));
+        document.bibliography.authors[0].contribution_id = document.id.clone();
+        assert!(
+            document
+                .validate_ids()
+                .unwrap_err()
+                .starts_with("duplicate ID")
         );
     }
 }

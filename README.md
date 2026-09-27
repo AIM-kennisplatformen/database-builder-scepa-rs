@@ -125,7 +125,10 @@ retained for operator repair.
 
 `GET /documents/requiring-fixing` returns every pending review case, newest
 first, including its document hash (when available), failed pipeline phase,
-error, artifact metadata, and retryability. `GET` and `PUT` on
+error, artifact metadata, and retryability. Each case also includes the document
+summary fields used by the document picker: `title` from its effective repair
+draft (or published artifact when no draft exists), plus `published_at` when
+it has previously been published. Missing values are `null`. `GET` and `PUT` on
 `/documents/requiring-fixing/{case_id}` load a repair draft and submit manually
 fixed data through `UpdateDocumentWorkflow`, respectively. External enrichment
 is represented by the repair contract but intentionally returns `501` until an

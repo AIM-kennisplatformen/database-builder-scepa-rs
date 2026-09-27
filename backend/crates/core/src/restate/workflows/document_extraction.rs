@@ -57,7 +57,27 @@ impl DocumentExtractionWorkflow {
             .call()
             .await?
             .into_inner();
-        let draft = DraftDocument::new(converted.output.clone());
+        let mut output = converted.output;
+        output.assign_extracted_ids(&request.pdf_hash);
+        let saved = ctx
+            .service_client::<ArtifactRestateServiceClient>()
+            .get_draft(Json(request.pdf_hash.clone()))
+            .call()
+            .await?
+            .into_inner();
+        let saved = match saved {
+            Some(saved) => Some(saved),
+            None => ctx
+                .service_client::<ArtifactRestateServiceClient>()
+                .get_published(Json(request.pdf_hash.clone()))
+                .call()
+                .await?
+                .into_inner(),
+        };
+        let mut draft = DraftDocument::new(output.clone());
+        if let Some(saved) = saved {
+            draft.manual_data = saved.manual_data;
+        }
         ctx.service_client::<ArtifactRestateServiceClient>()
             .store_draft(Json(StoreArtifactRequest {
                 pdf_hash: request.pdf_hash,
@@ -67,7 +87,7 @@ impl DocumentExtractionWorkflow {
             .await?;
 
         Ok(Json(PipelineExecuteResponse {
-            output: converted.output,
+            output,
             warnings: grobid
                 .warnings
                 .into_iter()

@@ -1,7 +1,8 @@
 //! Shared extraction helpers for values used across TEI sections.
 
 use crate::models::draft::{
-    BoundingBox, Contributor, ContributorRole, Identifier, IdentifierKind, IdentifierScope,
+    BoundingBox, Contributor, ContributorRole, DraftAffiliation, DraftOrganization, Identifier,
+    IdentifierKind, IdentifierScope,
 };
 
 use super::xml::XmlElement;
@@ -32,10 +33,19 @@ pub(super) fn parse_contributor(
         .first()
         .and_then(|affiliation| non_empty_text(affiliation));
     Some(Contributor {
+        id: String::new(),
+        contribution_id: String::new(),
         name,
         forename,
         surname,
-        affiliation,
+        affiliation: affiliation.map(|name| DraftAffiliation {
+            id: String::new(),
+            organization: DraftOrganization {
+                id: String::new(),
+                name,
+                ror_id: None,
+            },
+        }),
         role,
     })
 }

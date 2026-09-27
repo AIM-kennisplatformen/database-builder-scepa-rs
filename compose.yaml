@@ -48,6 +48,12 @@ services:
         condition: service_healthy
       typedb:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/3000'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
     restart: unless-stopped
 
   mcp:
@@ -85,6 +91,8 @@ services:
       qdrant:
         condition: service_healthy
       typedb:
+        condition: service_healthy
+      app:
         condition: service_healthy
     restart: unless-stopped
 

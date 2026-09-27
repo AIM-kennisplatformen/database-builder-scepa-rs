@@ -11,6 +11,7 @@ use crate::models::canonical::entities::{
 
 #[enum_dispatch]
 pub trait TAffiliation: Send + Sync {
+    fn affiliation_id(&self) -> &str;
     fn person(&self) -> &EPerson;
     fn organization(&self) -> &EOrganization;
     fn evidence(&self) -> &[Arc<EDocument>];
@@ -20,6 +21,7 @@ pub trait TAffiliation: Send + Sync {
     Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
 )]
 pub struct Affiliation {
+    pub affiliation_id: String,
     pub person: Arc<EPerson>,
     pub organization: Arc<EOrganization>,
     #[schema(value_type = Vec<Arc<EDocument>>, min_items = 1)]
@@ -27,6 +29,9 @@ pub struct Affiliation {
 }
 
 impl TAffiliation for Affiliation {
+    fn affiliation_id(&self) -> &str {
+        &self.affiliation_id
+    }
     fn person(&self) -> &EPerson {
         self.person.as_ref()
     }

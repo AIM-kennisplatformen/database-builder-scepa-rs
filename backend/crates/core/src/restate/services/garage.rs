@@ -49,6 +49,9 @@ impl GarageRestateService {
             .await
             .map_err(to_postgres_handler_error)?
             .map(Json)
-            .ok_or_else(|| TerminalError::new("PDF metadata was not found").into())
+            .ok_or_else(|| {
+                TerminalError::new_with_code(404, "The stored PDF metadata could not be found")
+                    .into()
+            })
     }
 }

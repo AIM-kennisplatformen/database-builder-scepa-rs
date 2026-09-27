@@ -11,6 +11,7 @@ use crate::models::canonical::entities::{
 
 #[enum_dispatch]
 pub trait TPublicationEvent: Send + Sync {
+    fn publication_event_id(&self) -> &str;
     fn publisher(&self) -> Option<&EOrganization>;
     fn venue(&self) -> Option<&EPublicationVenue>;
     fn work(&self) -> &EDocument;
@@ -29,6 +30,7 @@ pub trait TSubmission: TPublicationEvent {}
 )]
 #[builder(on(String, into))]
 pub struct Submission {
+    pub publication_event_id: String,
     pub publisher: Option<Arc<EOrganization>>,
     pub venue: Option<Arc<EPublicationVenue>>,
     pub work: Arc<EDocument>,
@@ -39,6 +41,9 @@ pub struct Submission {
 
 impl TSubmission for Submission {}
 impl TPublicationEvent for Submission {
+    fn publication_event_id(&self) -> &str {
+        &self.publication_event_id
+    }
     fn publisher(&self) -> Option<&EOrganization> {
         self.publisher.as_deref()
     }
@@ -71,6 +76,7 @@ pub trait TAcceptance: TPublicationEvent {}
 )]
 #[builder(on(String, into))]
 pub struct Acceptance {
+    pub publication_event_id: String,
     pub publisher: Option<Arc<EOrganization>>,
     pub venue: Option<Arc<EPublicationVenue>>,
     pub work: Arc<EDocument>,
@@ -81,6 +87,9 @@ pub struct Acceptance {
 
 impl TAcceptance for Acceptance {}
 impl TPublicationEvent for Acceptance {
+    fn publication_event_id(&self) -> &str {
+        &self.publication_event_id
+    }
     fn publisher(&self) -> Option<&EOrganization> {
         self.publisher.as_deref()
     }
@@ -115,6 +124,7 @@ pub trait TPublication: TPublicationEvent {
 )]
 #[builder(on(String, into))]
 pub struct Publication {
+    pub publication_event_id: String,
     pub publisher: Option<Arc<EOrganization>>,
     pub venue: Option<Arc<EPublicationVenue>>,
     pub work: Arc<EDocument>,
@@ -131,6 +141,9 @@ impl TPublication for Publication {
 }
 
 impl TPublicationEvent for Publication {
+    fn publication_event_id(&self) -> &str {
+        &self.publication_event_id
+    }
     fn publisher(&self) -> Option<&EOrganization> {
         self.publisher.as_deref()
     }

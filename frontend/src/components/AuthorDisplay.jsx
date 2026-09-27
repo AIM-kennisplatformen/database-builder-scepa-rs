@@ -1,0 +1,159 @@
+import { ChevronDown } from "lucide-react";
+import { useState } from "react";
+import { TEXT_REGEX, isValidField } from "../utils/validation";
+
+// Must match the backend's ContributorRole enum exactly (snake_case
+// "author"/"editor") — it rejects the whole save request otherwise.
+const ROLE_OPTIONS = [
+  { value: "author", label: "Author" },
+  { value: "editor", label: "Editor" },
+];
+
+export const AUTHOR_FIELDS = [
+  {
+    key: "forename",
+    label: "Forename*",
+    regex: TEXT_REGEX,
+    placeholder: "Forename",
+  },
+  {
+    key: "surname",
+    label: "Surname*",
+    regex: TEXT_REGEX,
+    placeholder: "Surname",
+  },
+  {
+    key: "affiliation",
+    label: "Affiliation",
+    regex: TEXT_REGEX,
+    placeholder: "Affiliation",
+  },
+  {
+    key: "role",
+    label: "Role",
+    type: "select",
+    options: ROLE_OPTIONS,
+    regex: "^(author|editor)$",
+  },
+];
+
+function getInitials(author) {
+  return `${author.forename?.[0] ?? ""}${author.surname?.[0] ?? ""}`.toUpperCase();
+}
+
+export default function AuthorDisplay({
+  author,
+  onChange,
+  onDelete,
+  missingName = false,
+}) {
+  const [open, setOpen] = useState(author.isOpen);
+
+  function handleChange(field, regex, value) {
+    onChange(field, value);
+    onChange("errors", {
+      ...author.errors,
+      [field]: !isValidField(value, regex),
+    });
+  }
+
+  return (
+    <div className="border rounded">
+      <div
+        className="w-full flex flex-row items-center border-b p-2 hover:cursor-pointer"
+        onClick={() => setOpen(!open)}
+      >
+        <div className="flex items-center justify-center w-9 h-9 shrink-0 rounded-full text-white text-sm font-medium bg-primary">
+          {getInitials(author)}
+        </div>
+        <div className="flex flex-col px-2 min-w-0 flex-1">
+          <p className="text-black">
+            {author.forename} {author.surname}
+          </p>
+          <p className="text-xs text-muted-foreground truncate">
+            {author.affiliation?.organization?.name}
+          </p>
+        </div>
+        <button
+          className="p-2! ml-2 bg-accent! border border-primary! text-primary!"
+          onClick={() => setOpen(!open)}
+        >
+          <ChevronDown
+            className={`shrink-0 transition-transform duration-200 ${
+              open ? "rotate-180" : ""
+            }`}
+          />
+        </button>
+      </div>
+      {open && (
+        <div className="p-2">
+          {AUTHOR_FIELDS.map((field) => {
+            const requiredNameField =
+              missingName &&
+              (field.key === "forename" || field.key === "surname");
+            const hasError = author.errors?.[field.key] || requiredNameField;
+            const value =
+              field.type === "select"
+                ? (author[field.key] ?? field.options[0].value)
+                : field.key === "affiliation"
+                  ? (author.affiliation?.organization?.name ?? "")
+                  : (author[field.key] ?? "");
+
+            return (
+              <div className="flex flex-col py-1" key={field.key}>
+                <label className="text-sm text-primary font-medium">
+                  {field.label}
+                </label>
+                {field.type === "select" ? (
+                  <select
+                    className={`bg-accent text-black rounded px-2 py-1 border ${
+                      hasError ? "border-red-500" : "border-border"
+                    }`}
+                    value={value}
+                    onChange={(e) =>
+                      handleChange(field.key, field.regex, e.target.value)
+                    }
+                    aria-invalid={hasError || undefined}
+                  >
+                    {field.options.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className={`bg-accent text-black rounded px-2 py-1 border ${
+                      hasError ? "border-red-500" : "border-border"
+                    }`}
+                    value={value}
+                    onChange={(e) =>
+                      handleChange(field.key, field.regex, e.target.value)
+                    }
+                    aria-invalid={hasError || undefined}
+                    placeholder={field.placeholder}
+                  />
+                )}
+                {author.errors?.[field.key] && (
+                  <span className="text-xs text-red-500">
+                    Invalid format for {field.label.toLowerCase()}
+                  </span>
+                )}
+                {requiredNameField && !author.errors?.[field.key] && (
+                  <span className="text-xs text-red-500">
+                    This field is required
+                  </span>
+                )}
+              </div>
+            );
+          })}
+          <div className="flex justify-end py-2">
+            <button className="bg-red-700!" onClick={onDelete}>
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

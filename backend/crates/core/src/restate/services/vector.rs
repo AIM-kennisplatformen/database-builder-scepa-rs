@@ -63,8 +63,11 @@ impl VectorRestateService {
 }
 
 fn to_handler_error(error: VectorPipelineError) -> HandlerError {
-    if error.is_terminal() {
-        TerminalError::new(error.to_string()).into()
+    if matches!(error, VectorPipelineError::DuplicateIdentity { .. }) {
+        crate::conflict::Conflict::PassageIdentity.terminal().into()
+    } else if error.is_terminal() {
+        tracing::error!(error = %error, "terminal vector pipeline failure");
+        TerminalError::new_with_code(500, "Document indexing failed").into()
     } else {
         std::io::Error::other(error.to_string()).into()
     }
@@ -78,11 +81,11 @@ mod tests {
     #[test]
     fn update_request_keeps_both_effective_documents() {
         let document = TeiDocument {
+            id: String::new(),
             level: PassageLevel::Paragraph,
             bibliography: Bibliography::default(),
             body_text: vec![],
             figures_and_tables: vec![],
-            references: vec![],
         };
         let request = VectorUpdateRequest {
             pdf_hash: "a".repeat(64),
