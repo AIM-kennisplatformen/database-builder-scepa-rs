@@ -28,12 +28,18 @@ export default function UploadDocumentPage() {
   };
 
   async function handleFileUpload(file) {
+    console.log(file);
+
     setUploading(true);
     setError("");
     try {
       const response = await fetch("/api/pdfs", {
         method: "POST",
-        headers: { "Content-Type": "application/pdf" },
+        headers: {
+          "Content-Type": allowedFileTypes.includes(file.type)
+            ? file.type
+            : "application/pdf",
+        },
         body: file,
       });
       const text = await response.text();

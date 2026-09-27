@@ -1,4 +1,4 @@
-export const TEXT_REGEX = "^[A-Za-zÀ-ÖØ-öø-ÿ0-9\\s.,:;'\"!?()&-]+$";
+export const TEXT_REGEX = "^[A-Za-zÀ-ÖØ-öø-ÿ0-9\\s.,:;'\"!?()&/-]+$";
 
 export function isValidField(value, regex) {
   // No regex configured for this field means there's nothing to validate against.
