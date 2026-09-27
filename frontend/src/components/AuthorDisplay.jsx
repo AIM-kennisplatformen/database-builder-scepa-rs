@@ -41,14 +41,6 @@ function getInitials(author) {
   return `${author.forename?.[0] ?? ""}${author.surname?.[0] ?? ""}`.toUpperCase();
 }
 
-function stripAffiliationNumber(affiliation) {
-  // Removes a leading footnote-style number
-  // ^\s*  optional leading whitespace
-  // \d+   one or more digits (the footnote marker)
-  // \s*   optional whitespace after the number
-  return affiliation?.replace(/^\s*\d+\s*/, "") ?? affiliation;
-}
-
 export default function AuthorDisplay({
   author,
   onChange,
@@ -79,7 +71,7 @@ export default function AuthorDisplay({
             {author.forename} {author.surname}
           </p>
           <p className="text-xs text-muted-foreground truncate">
-            {stripAffiliationNumber(author.affiliation?.organization?.name)}
+            {author.affiliation?.organization?.name}
           </p>
         </div>
         <button
@@ -104,9 +96,7 @@ export default function AuthorDisplay({
               field.type === "select"
                 ? (author[field.key] ?? field.options[0].value)
                 : field.key === "affiliation"
-                  ? (stripAffiliationNumber(
-                      author.affiliation?.organization?.name,
-                    ) ?? "")
+                  ? (author.affiliation?.organization?.name ?? "")
                   : (author[field.key] ?? "");
 
             return (

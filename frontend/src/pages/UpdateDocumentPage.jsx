@@ -191,6 +191,14 @@ function authorFieldDisplayValue(field, author) {
   return author[field.key] ?? "";
 }
 
+function stripAffiliationNumber(affiliation) {
+  // Removes a leading footnote-style number
+  // ^\s*  optional leading whitespace
+  // \d+   one or more digits (the footnote marker)
+  // \s*   optional whitespace after the number
+  return affiliation?.replace(/^\s*\d+\s*/, "") ?? affiliation;
+}
+
 // Builds the nested affiliation shape from the plain organization-name string
 // AuthorDisplay's input produces, preserving any previously loaded IDs.
 function applyAuthorFieldChange(author, field, value) {
@@ -206,7 +214,7 @@ function applyAuthorFieldChange(author, field, value) {
           id: "",
           ror_id: null,
           ...author.affiliation?.organization,
-          name: value,
+          name: stripAffiliationNumber(value),
         },
       },
     };
@@ -354,7 +362,17 @@ export default function UpdateDocumentPage({}) {
         name: author.name,
         forename: author.forename,
         surname: author.surname,
-        affiliation: author.affiliation ?? null,
+        affiliation: author.affiliation
+          ? {
+              ...author.affiliation,
+              organization: {
+                ...author.affiliation.organization,
+                name: stripAffiliationNumber(
+                  author.affiliation.organization?.name,
+                ),
+              },
+            }
+          : null,
         role: author.role,
         isOpen: false,
         errors: {},
@@ -511,8 +529,6 @@ export default function UpdateDocumentPage({}) {
       })
       .finally(() => setIsSaving(false));
   }
-
-  console.log(missingFields);
 
   return (
     <div className="flex h-screen w-full py-6 mt-1">
