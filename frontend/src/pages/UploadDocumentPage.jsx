@@ -1,4 +1,4 @@
-import { ChevronLeft, File, FileText, Loader2, Upload, X } from "lucide-react";
+import { ChevronLeft, File, Loader2, Upload, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 
@@ -11,7 +11,7 @@ export default function UploadDocumentPage() {
 
   const allowedFileTypes = [
     "application/pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    // "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ];
 
   const handleInputChange = (e) => {
@@ -23,13 +23,11 @@ export default function UploadDocumentPage() {
       setFile(file);
       setError("");
     } else {
-      setError("Document must be a PDF or Word document");
+      setError("Document must be of file type PDF");
     }
   };
 
   async function handleFileUpload(file) {
-    console.log(file);
-
     setUploading(true);
     setError("");
     try {

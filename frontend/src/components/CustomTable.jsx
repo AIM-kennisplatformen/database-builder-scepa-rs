@@ -1,4 +1,4 @@
-import { ChevronRight, TriangleAlert } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 
 export default function CustomTable({
   headers,
