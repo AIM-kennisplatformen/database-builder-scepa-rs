@@ -215,6 +215,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let handler = LiteratureMcp { search };
     let config = StreamableHttpServerConfig::default()
+        .disable_allowed_hosts()
         .with_legacy_session_mode(false)
         .with_json_response(true);
     let mcp_service = StreamableHttpService::new(
