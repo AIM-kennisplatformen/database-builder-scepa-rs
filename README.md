@@ -160,8 +160,8 @@ The self-contained project under `mcp/` exposes authenticated Streamable HTTP at
 publication-date, document-type, and organization filters, similarity-searches
 `4 × top_k` source passages in Qdrant, resolves their linked combined passages,
 and reranks them locally. Search responses always include bibliographic metadata
-and deterministic IEEE references keyed by each result's `pdf_hash`. Hashes are
-opaque association keys, not user-facing citations.
+as deterministic IEEE references with passages grouped by document. PDF hashes
+and reranker scores remain internal and are not returned by the MCP tool.
 
 Set `MCP_BEARER_TOKEN` before starting the service. The unquantized
 `cross-encoder/ms-marco-MiniLM-L6-v2` ONNX model is downloaded on first startup

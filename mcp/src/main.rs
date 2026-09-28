@@ -123,10 +123,9 @@ impl LiteratureMcp {
             Only set publication or organization filters when the user requests them.
 
         Output arguments:
-            results contains reranked passage text, an opaque pdf_hash, and an internal score from 0.0 through 1.0.
-            metadata_by_pdf_hash contains bibliographic metadata and ieee_reference citations keyed by pdf_hash.
-            usage_note explains restrictions on internal fields.
-            Copy ieee_reference verbatim; scores and pdf_hash values must never be shown to the user.
+            sources groups relevant passages by document in ranked order.
+            Each source contains an ieee_reference generated from bibliographic metadata and its relevant passages.
+            Select only the sources used in the answer and copy their ieee_reference values verbatim into the references section.
         "#)]
     async fn search_literature(
         &self,
@@ -149,10 +148,9 @@ impl LiteratureMcp {
     name = "scepa-literature",
     version = "0.1.0",
     instructions = r#"
-    Use search_literature to retrieve evidence passages and their bibliographic metadata.
-    Copy ieee_reference verbatim for citations.
-    Treat pdf_hash values only as opaque keys that associate passages with metadata; never present them as citations or document identifiers.
-    Use scores only to assess the relative relevance of returned passages; never show scores to the user.
+    Use search_literature to retrieve evidence passages grouped by source.
+    Cite only sources whose passages support the answer, and copy each selected source's ieee_reference verbatim.
+    Assign citation numbers after selecting the sources used in the answer.
     "#
 )]
 impl ServerHandler for LiteratureMcp {}
@@ -415,7 +413,9 @@ mod tests {
         assert!(description.contains("Use case:"));
         assert!(description.contains("Input arguments:"));
         assert!(description.contains("Output arguments:"));
-        assert!(description.contains("score"));
-        assert!(description.contains("must never be shown to the user"));
+        assert!(description.contains("sources groups relevant passages by document"));
+        assert!(description.contains("copy their ieee_reference values verbatim"));
+        assert!(!description.contains("pdf_hash"));
+        assert!(!description.contains("score"));
     }
 }

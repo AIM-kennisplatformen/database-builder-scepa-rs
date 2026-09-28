@@ -88,7 +88,6 @@ impl MetadataStore {
             documents.insert(
                 hash.clone(),
                 DocumentMetadata {
-                    pdf_hash: hash,
                     document_id: row_string(&row, "document_id")?,
                     document_type: row_label(&row, "document_type")?,
                     title: row_string(&row, "title")?,
