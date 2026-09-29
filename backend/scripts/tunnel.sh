@@ -10,7 +10,7 @@ if [[ -f "${env_file}" ]]; then
   source "${env_file}"
 fi
 
-ssh_target="${SCEPA_SSH_TARGET}"
+ssh_target="${SCEPA_SSH_TARGET:-}"
 open_browser=true
 
 usage() {
@@ -38,6 +38,12 @@ while (($#)); do
   esac
   shift
 done
+
+if [[ -z "${ssh_target}" ]]; then
+  printf 'SSH target is required. Set SCEPA_SSH_TARGET in %s or pass user@host.\n' "${env_file}" >&2
+  usage >&2
+  exit 2
+fi
 
 forward_args=(
   -L 13000:127.0.0.1:3000   # Upload API
