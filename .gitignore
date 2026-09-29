@@ -5,6 +5,7 @@
 /frontend/.next/
 /.sources/
 .env
+.env.*
 !.env.example
 /.scannerwork
 /.data/
