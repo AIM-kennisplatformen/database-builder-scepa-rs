@@ -10,6 +10,7 @@ pub struct PublicationDateFilter {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[schemars(inline)]
 pub enum DocumentTypeFilter {
     /// The exact base document type, excluding its research_paper, report, and book subtypes.
     Document,
@@ -23,6 +24,7 @@ pub enum DocumentTypeFilter {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[schemars(inline)]
 pub enum UserPersonaFilter {
     StrategicOverview,
     BestPractices,
@@ -41,6 +43,7 @@ impl UserPersonaFilter {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[schemars(inline)]
 pub enum LiteratureKindFilter {
     GreyLiterature,
     ScientificLiterature,
@@ -70,6 +73,7 @@ impl DocumentTypeFilter {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[schemars(inline)]
 pub enum OrganizationRoleFilter {
     /// Match publisher, affiliation, or contributor relationships.
     Any,
@@ -83,6 +87,7 @@ pub enum OrganizationRoleFilter {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[schemars(inline)]
 pub enum OrganizationTypeFilter {
     /// Any organization, including all organization subtypes.
     Organization,

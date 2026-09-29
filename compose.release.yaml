@@ -26,6 +26,7 @@ services:
       RUST_LOG: ${RUST_LOG:-scepa_mcp=info}
     ports: !override
       - "127.0.0.1:${MCP_PORT:-8002}:8002"
+      - "${DOCKER_HOST_GATEWAY:-172.17.0.1}:${MCP_PORT:-8002}:8002"
     volumes: !override
       - mcp_model_cache:/models/huggingface
 

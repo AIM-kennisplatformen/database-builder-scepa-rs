@@ -169,14 +169,20 @@ scepakp.mads-han.src.surf-hosted.nl {
         reverse_proxy 127.0.0.1:5173
     }
 
-    handle {
+    redir /chatep /chatep/ 308
+
+    handle /chatep/* {
         reverse_proxy 127.0.0.1:10090
+    }
+
+    handle {
+        respond "Not found" 404
     }
 }
 ```
 
-This leaves Studio at `/` with its existing `/api/` and Socket.IO routes,
-serves the bearer-token-protected literature MCP at `/mcp`, and keeps the SCEPA
+This serves Studio and its API and Socket.IO routes under `/chatep/`, serves
+the bearer-token-protected literature MCP at `/mcp`, and keeps the SCEPA
 operator UI and its API under the Basic-authenticated `/upload/` path.
 
 ## API

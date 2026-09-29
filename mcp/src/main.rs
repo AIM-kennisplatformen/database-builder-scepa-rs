@@ -399,14 +399,56 @@ mod tests {
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|description| description.contains("reranked passages"))
         );
-        assert_eq!(
-            schema["$defs"]["UserPersonaFilter"]["enum"],
-            serde_json::json!(["strategic_overview", "best_practices", "target_groups"])
-        );
-        assert_eq!(
-            schema["$defs"]["LiteratureKindFilter"]["enum"],
-            serde_json::json!(["grey_literature", "scientific_literature", "project_report"])
-        );
+        for (parameter, expected_values) in [
+            (
+                "document_types",
+                serde_json::json!(["document", "research_paper", "report", "book"]),
+            ),
+            (
+                "user_personas",
+                serde_json::json!(["strategic_overview", "best_practices", "target_groups"]),
+            ),
+            (
+                "literature_kinds",
+                serde_json::json!(["grey_literature", "scientific_literature", "project_report"]),
+            ),
+            (
+                "organization_roles",
+                serde_json::json!(["any", "publisher", "affiliation", "contributor"]),
+            ),
+            (
+                "organization_types",
+                serde_json::json!([
+                    "organization",
+                    "institution",
+                    "government_institution",
+                    "educational_institution",
+                    "nonprofit_institution",
+                    "publisher"
+                ]),
+            ),
+        ] {
+            let items = &properties[parameter]["items"];
+            let actual_values = items.get("enum").cloned().or_else(|| {
+                items.get("oneOf")?.as_array().map(|variants| {
+                    serde_json::Value::Array(
+                        variants
+                            .iter()
+                            .filter_map(|variant| variant.get("const").cloned())
+                            .collect(),
+                    )
+                })
+            });
+            assert_eq!(
+                actual_values,
+                Some(expected_values),
+                "{parameter} values should be exposed inline"
+            );
+            assert!(
+                items.get("$ref").is_none(),
+                "{parameter} items should not use a schema reference"
+            );
+        }
     }
 
     #[test]
