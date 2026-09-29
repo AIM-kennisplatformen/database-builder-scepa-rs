@@ -56,6 +56,18 @@ const BIBLIOGRAPHY_FIELDS = [
   },
 ];
 
+const USER_PERSONAS = [
+  { value: "strategic_overview", label: "Strategic overview" },
+  { value: "best_practices", label: "Best practices" },
+  { value: "target_groups", label: "Target groups" },
+];
+
+const LITERATURE_KINDS = [
+  { value: "grey_literature", label: "Grey literature" },
+  { value: "scientific_literature", label: "Scientific literature" },
+  { value: "project_report", label: "Project report" },
+];
+
 function isEmptyValue(value) {
   return value == null || value === "";
 }
@@ -278,6 +290,10 @@ export default function UpdateDocumentPage({}) {
   const [contributorsFieldsData, setContributorsFieldsData] = useState([
     createBlankContributor(),
   ]);
+  const [classificationData, setClassificationData] = useState({
+    user_personas: [],
+    literature_kind: null,
+  });
   const pendingSaveRef = useRef(null);
 
   const bibliography =
@@ -343,6 +359,11 @@ export default function UpdateDocumentPage({}) {
     }
 
     const bibliography = effectiveBibliography(document.artifact);
+    const classification = document.artifact?.manual_data?.classification;
+    setClassificationData({
+      user_personas: classification?.user_personas ?? [],
+      literature_kind: classification?.literature_kind ?? null,
+    });
 
     if (bibliography) {
       setBibliographyFieldsData({
@@ -412,7 +433,11 @@ export default function UpdateDocumentPage({}) {
     });
   }
 
-  function onDocumentSave(bibliographyFieldsData, contributorsFieldsData) {
+  function onDocumentSave(
+    bibliographyFieldsData,
+    contributorsFieldsData,
+    classificationData,
+  ) {
     //check if data arrays are empty
     const hasBibliographyData = Object.values(bibliographyFieldsData).some(
       (value) => !isEmptyValue(value),
@@ -506,7 +531,7 @@ export default function UpdateDocumentPage({}) {
 
     setIsSaving(true);
 
-    saveDocument({ bibliography })
+    saveDocument({ bibliography, classification: classificationData })
       .then((response) => {
         //handle the errors like in the uploadPage
         if (!response.ok) {
@@ -693,13 +718,72 @@ export default function UpdateDocumentPage({}) {
                 </>
               )}
             </div>
+
+            <fieldset className="flex flex-col gap-3 rounded border border-border p-3">
+              <legend className="px-1 font-bold text-primary">
+                Classification
+              </legend>
+              <div className="flex flex-col gap-2">
+                <span className="text-sm font-medium text-primary">
+                  User personas
+                </span>
+                {USER_PERSONAS.map((persona) => (
+                  <label
+                    key={persona.value}
+                    className="flex items-center gap-2 text-sm text-black"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={classificationData.user_personas.includes(
+                        persona.value,
+                      )}
+                      onChange={(event) =>
+                        setClassificationData((previous) => ({
+                          ...previous,
+                          user_personas: event.target.checked
+                            ? [...previous.user_personas, persona.value]
+                            : previous.user_personas.filter(
+                                (value) => value !== persona.value,
+                              ),
+                        }))
+                      }
+                    />
+                    {persona.label}
+                  </label>
+                ))}
+              </div>
+              <label className="flex flex-col gap-1 text-sm text-primary">
+                <span className="font-medium">Literature kind</span>
+                <select
+                  value={classificationData.literature_kind ?? ""}
+                  onChange={(event) =>
+                    setClassificationData((previous) => ({
+                      ...previous,
+                      literature_kind: event.target.value || null,
+                    }))
+                  }
+                  className="rounded border border-border bg-white px-2 py-1 text-black"
+                >
+                  <option value="">Select a literature kind</option>
+                  {LITERATURE_KINDS.map((kind) => (
+                    <option key={kind.value} value={kind.value}>
+                      {kind.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </fieldset>
           </div>
         )}
         <button
           className="w-full flex items-center justify-center gap-2 rounded bg-primary py-2 text-white my-4"
           disabled={isSaving}
           onClick={() =>
-            onDocumentSave(bibliographyFieldsData, contributorsFieldsData)
+            onDocumentSave(
+              bibliographyFieldsData,
+              contributorsFieldsData,
+              classificationData,
+            )
           }
         >
           {isSaving && <Loader2 className="size-4 animate-spin" />}
