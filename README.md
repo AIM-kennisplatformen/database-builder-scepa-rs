@@ -74,6 +74,70 @@ The stack exposes:
 - Qdrant HTTP/gRPC: `localhost:6333` / `localhost:6334`
 - SonarQube with `tools`: `http://localhost:9000`
 
+## Release deployment and administrative access
+
+`compose.release.yaml` builds the `release` Dockerfile stages for the API,
+frontend, and MCP services. All published ports bind to `127.0.0.1` in release
+mode. This keeps the services reachable from the deployment host while
+preventing direct access through the VM's public network interfaces.
+
+The frontend and MCP loopback ports are intended as upstreams for a reverse
+proxy such as Caddy, which should provide public HTTPS on ports 80 and 443. The
+remaining ports are for administrators and should not be changed to
+`0.0.0.0`. Access them remotely through SSH tunnels instead.
+
+| Service | Local endpoint |
+| --- | --- |
+| Frontend, including the `/api/` proxy | `http://127.0.0.1:5173` |
+| API, for direct diagnostics | `http://127.0.0.1:3000` |
+| Literature MCP | `http://127.0.0.1:8002/mcp` |
+| TypeDB gRPC | `127.0.0.1:1729` |
+| TypeDB HTTP | `http://127.0.0.1:8000` |
+| PostgreSQL | `127.0.0.1:5432` |
+| Qdrant HTTP | `http://127.0.0.1:6333` |
+| Qdrant gRPC | `127.0.0.1:6334` |
+| Garage S3 API | `http://127.0.0.1:3900` |
+| Garage admin API | `http://127.0.0.1:3903` |
+| Grobid | `http://127.0.0.1:8070` |
+| Restate ingress | `http://127.0.0.1:8080` |
+| Restate admin UI/API | `http://127.0.0.1:9070` |
+| Restate fabric | `127.0.0.1:5122` |
+
+To access one service from an administrator workstation, forward its port over
+SSH. For example, this exposes the Restate admin UI at
+`http://localhost:9070` on the workstation:
+
+```bash
+ssh -N -L 9070:127.0.0.1:9070 user@your-vm
+```
+
+Multiple services can be forwarded in one session. This example provides local
+access to Restate, Qdrant, TypeDB HTTP, Garage admin, and PostgreSQL:
+
+```bash
+ssh -N \
+  -L 9070:127.0.0.1:9070 \
+  -L 6333:127.0.0.1:6333 \
+  -L 8000:127.0.0.1:8000 \
+  -L 3903:127.0.0.1:3903 \
+  -L 5432:127.0.0.1:5432 \
+  user@your-vm
+```
+
+Keep the SSH session open while using the forwarded services. Replace
+`user@your-vm` with the deployment account and VM hostname. If a workstation
+port is already occupied, change only the first port in that forwarding rule;
+for example, `-L 15432:127.0.0.1:5432` makes PostgreSQL available locally on
+port `15432`.
+
+Port variables in `.env` change both the VM loopback port and the corresponding
+SSH-tunnel source port. Inspect the effective release configuration before
+deployment with:
+
+```bash
+docker compose -f compose.release.yaml config
+```
+
 ## API
 
 The API generates an OpenAPI 3.1 document from its handler annotations. With

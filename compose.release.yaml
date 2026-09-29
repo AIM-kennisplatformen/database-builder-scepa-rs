@@ -7,6 +7,8 @@ services:
       target: release
     environment:
       RUST_LOG: ${RUST_LOG:-scepa=info}
+    ports: !override
+      - "127.0.0.1:${API_PORT:-3000}:3000"
     volumes: !reset []
 
   frontend:
@@ -14,7 +16,7 @@ services:
       target: release
     environment: !reset {}
     ports: !override
-      - "${FRONTEND_PORT:-5173}:80"
+      - "127.0.0.1:${FRONTEND_PORT:-5173}:80"
     volumes: !reset []
 
   mcp:
@@ -22,5 +24,36 @@ services:
       target: release
     environment:
       RUST_LOG: ${RUST_LOG:-scepa_mcp=info}
+    ports: !override
+      - "127.0.0.1:${MCP_PORT:-8002}:8002"
     volumes: !override
       - mcp_model_cache:/models/huggingface
+
+  typedb:
+    ports: !override
+      - "127.0.0.1:${TYPEDB_GRPC_PORT}:1729"
+      - "127.0.0.1:${TYPEDB_HTTP_PORT}:8000"
+
+  postgres:
+    ports: !override
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
+
+  qdrant:
+    ports: !override
+      - "127.0.0.1:${QDRANT_HTTP_PORT:-6333}:6333"
+      - "127.0.0.1:${QDRANT_GRPC_PORT:-6334}:6334"
+
+  garage:
+    ports: !override
+      - "127.0.0.1:${GARAGE_S3_PORT}:3900"
+      - "127.0.0.1:${GARAGE_ADMIN_PORT}:3903"
+
+  grobid:
+    ports: !override
+      - "127.0.0.1:${GROBID_PORT}:8070"
+
+  restate:
+    ports: !override
+      - "127.0.0.1:${RESTATE_INGRESS_PORT}:8080"
+      - "127.0.0.1:${RESTATE_ADMIN_PORT}:9070"
+      - "127.0.0.1:${RESTATE_FABRIC_PORT}:5122"
