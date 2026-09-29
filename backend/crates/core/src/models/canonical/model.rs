@@ -19,7 +19,9 @@ use super::{
         publication_event::{EPublicationEvent, Publication},
     },
 };
-use crate::models::draft::{ContributorRole, Identifier, IdentifierKind, TeiDocument};
+use crate::models::draft::{
+    ContributorRole, DocumentClassification, Identifier, IdentifierKind, TeiDocument,
+};
 
 /// A canonical object graph whose nodes and relations map directly to the TypeDB schema.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
@@ -149,6 +151,15 @@ impl CanonicalModel {
     /// Canonicalises a draft, using the exact PDF SHA-256 as its identifier
     /// only when the draft has no usable bibliographic identifier.
     pub fn try_from_with_pdf_hash(draft: &TeiDocument, pdf_hash: &str) -> eros::Result<Self> {
+        Self::try_from_with_classification(draft, pdf_hash, &DocumentClassification::default())
+    }
+
+    /// Canonicalises a draft and carries its operator-authored classification.
+    pub fn try_from_with_classification(
+        draft: &TeiDocument,
+        pdf_hash: &str,
+        classification: &DocumentClassification,
+    ) -> eros::Result<Self> {
         if pdf_hash.len() != 64
             || !pdf_hash
                 .bytes()
@@ -160,15 +171,21 @@ impl CanonicalModel {
         validate_required_fields(draft)?;
 
         let fallback_document_id = format!("sha256:{pdf_hash}");
-        Self::from_draft(draft, Some(fallback_document_id), Some(pdf_hash.to_owned()))
+        Self::from_draft(
+            draft,
+            Some(fallback_document_id),
+            Some(pdf_hash.to_owned()),
+            classification,
+        )
     }
 
     fn from_draft(
         draft: &TeiDocument,
         fallback_document_id: Option<String>,
         pdf_hash: Option<String>,
+        classification: &DocumentClassification,
     ) -> eros::Result<Self> {
-        let document = canonical_document(draft, fallback_document_id, pdf_hash)?;
+        let document = canonical_document(draft, fallback_document_id, pdf_hash, classification)?;
         if draft.bibliography.authors.is_empty() {
             eros::bail!("canonical document requires at least one contributor")
         }
@@ -354,7 +371,7 @@ impl TryFrom<&TeiDocument> for CanonicalModel {
 
     fn try_from(draft: &TeiDocument) -> Result<Self, Self::Error> {
         validate_required_fields(draft)?;
-        Self::from_draft(draft, None, None)
+        Self::from_draft(draft, None, None, &DocumentClassification::default())
     }
 }
 
@@ -362,6 +379,7 @@ fn canonical_document(
     draft: &TeiDocument,
     fallback_document_id: Option<String>,
     pdf_hash: Option<String>,
+    classification: &DocumentClassification,
 ) -> eros::Result<DocumentNode> {
     let Some(title) = non_empty(draft.bibliography.title.as_deref()) else {
         eros::bail!("canonical document requires a title")
@@ -375,6 +393,7 @@ fn canonical_document(
             document_id: stable_document_id.clone().unwrap_or_else(|| doi.to_owned()),
             pdf_hash,
             title: title.to_owned(),
+            classification: classification.clone(),
             doi: Some(doi.to_owned()),
         }));
     }
@@ -388,6 +407,7 @@ fn canonical_document(
                 .unwrap_or_else(|| isbn.to_owned()),
             pdf_hash,
             title: title.to_owned(),
+            classification: classification.clone(),
             isbn: Some(isbn.to_owned()),
         }));
     }
@@ -410,6 +430,7 @@ fn canonical_document(
         document_id,
         pdf_hash,
         title: title.to_owned(),
+        classification: classification.clone(),
     }))
 }
 
@@ -521,6 +542,24 @@ mod tests {
         assert_eq!(canonical.document.document_id(), "10.1234/example");
         assert_eq!(canonical.document.title(), "A paper");
         assert_eq!(canonical.document.entity_type(), "research_paper");
+    }
+
+    #[test]
+    fn canonical_document_keeps_manual_classification() {
+        use crate::models::draft::{DocumentClassification, LiteratureKind, UserPersona};
+
+        let classification = DocumentClassification {
+            user_personas: [UserPersona::BestPractices].into_iter().collect(),
+            literature_kind: Some(LiteratureKind::ScientificLiterature),
+        };
+        let canonical = CanonicalModel::try_from_with_classification(
+            &draft(Some("A paper"), vec![]),
+            &"a".repeat(64),
+            &classification,
+        )
+        .unwrap();
+
+        assert_eq!(canonical.document.classification(), &classification);
     }
 
     #[test]

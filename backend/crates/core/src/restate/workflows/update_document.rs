@@ -94,7 +94,9 @@ impl UpdateDocumentWorkflow {
                     workflow_id: ctx.key().to_owned(),
                     pdf_hash: request.pdf_hash.clone(),
                     old_document: old_document.clone(),
+                    old_classification: old_artifact.manual_data.classification.clone(),
                     new_document: new_document.clone(),
+                    new_classification: new_artifact.manual_data.classification.clone(),
                 }))
                 .call()
                 .await?
@@ -119,6 +121,7 @@ impl UpdateDocumentWorkflow {
                         .unwrap_or_else(|| ctx.key().to_owned()),
                     pdf_hash: request.pdf_hash.clone(),
                     document: new_document.clone(),
+                    classification: new_artifact.manual_data.classification.clone(),
                 }))
                 .call()
                 .await?

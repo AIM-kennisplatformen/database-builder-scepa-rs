@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 
 use super::identity::{is_uuid, stable_id};
 use crate::models::draft::{
@@ -15,6 +15,93 @@ use crate::models::draft::{
 pub enum PassageLevel {
     Paragraph,
     Sentence,
+}
+
+/// The intended way a reader will use a document.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    utoipa::ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum UserPersona {
+    StrategicOverview,
+    BestPractices,
+    TargetGroups,
+}
+
+impl UserPersona {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::StrategicOverview => "strategic_overview",
+            Self::BestPractices => "best_practices",
+            Self::TargetGroups => "target_groups",
+        }
+    }
+}
+
+/// The manually selected publication category for a document.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LiteratureKind {
+    GreyLiterature,
+    ScientificLiterature,
+    ProjectReport,
+}
+
+impl LiteratureKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::GreyLiterature => "grey_literature",
+            Self::ScientificLiterature => "scientific_literature",
+            Self::ProjectReport => "project_report",
+        }
+    }
+}
+
+/// Operator-authored classifications. Literature kind stays optional in stored
+/// artifacts so old and newly uploaded documents remain readable.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(default)]
+pub struct DocumentClassification {
+    /// Zero to three unique manual audience markers.
+    #[serde(default, deserialize_with = "deserialize_user_personas")]
+    #[schema(max_items = 3)]
+    pub user_personas: BTreeSet<UserPersona>,
+    /// Optional manual literature category. Ingestion leaves it unset.
+    pub literature_kind: Option<LiteratureKind>,
+}
+
+fn deserialize_user_personas<'de, D>(deserializer: D) -> Result<BTreeSet<UserPersona>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let values = Vec::<UserPersona>::deserialize(deserializer)?;
+    let count = values.len();
+    let values = values.into_iter().collect::<BTreeSet<_>>();
+    if values.len() != count {
+        return Err(de::Error::custom(
+            "classification.user_personas must not contain duplicate values",
+        ));
+    }
+    Ok(values)
+}
+
+impl DocumentClassification {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.user_personas.len() > 3 {
+            return Err("classification.user_personas must contain at most three values".into());
+        }
+        Ok(())
+    }
 }
 
 /// A complete application-facing representation of a TEI document.
@@ -441,6 +528,7 @@ fn validate_id(value: &str, label: &str, seen: &mut HashSet<String>) -> Result<(
 #[serde(default)]
 pub struct ManualDocument {
     pub bibliography: ManualBibliography,
+    pub classification: DocumentClassification,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body_text: Option<Vec<Passage>>,
 }
@@ -507,9 +595,76 @@ mod tests {
         assert!(value.get("grobid_extraction_data").is_some());
         assert_eq!(
             value["manual_data"],
-            serde_json::json!({ "bibliography": {} })
+            serde_json::json!({
+                "bibliography": {},
+                "classification": {
+                    "user_personas": [],
+                    "literature_kind": null
+                }
+            })
         );
         assert!(value.get("extracted_data").is_none());
+    }
+
+    #[test]
+    fn artifact_without_classification_uses_safe_default() {
+        let value = serde_json::json!({
+            "grobid_extraction_data": extracted(),
+            "manual_data": { "bibliography": {} }
+        });
+
+        let draft: DraftDocument = serde_json::from_value(value).unwrap();
+
+        assert_eq!(
+            draft.manual_data.classification,
+            DocumentClassification::default()
+        );
+    }
+
+    #[test]
+    fn classification_is_optional_and_requires_unique_personas() {
+        let mut classification = DocumentClassification::default();
+        classification.validate().unwrap();
+        classification.literature_kind = Some(LiteratureKind::ProjectReport);
+        classification.user_personas = [
+            UserPersona::StrategicOverview,
+            UserPersona::BestPractices,
+            UserPersona::TargetGroups,
+        ]
+        .into_iter()
+        .collect();
+        classification.validate().unwrap();
+    }
+
+    #[test]
+    fn duplicate_personas_are_rejected_during_deserialization() {
+        let error = serde_json::from_value::<DocumentClassification>(serde_json::json!({
+            "user_personas": ["strategic_overview", "strategic_overview"],
+            "literature_kind": null
+        }))
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("must not contain duplicate values")
+        );
+    }
+
+    #[test]
+    fn unsupported_classification_values_are_rejected() {
+        for value in [
+            serde_json::json!({
+                "user_personas": ["unsupported_persona"],
+                "literature_kind": null
+            }),
+            serde_json::json!({
+                "user_personas": [],
+                "literature_kind": "unsupported_kind"
+            }),
+        ] {
+            assert!(serde_json::from_value::<DocumentClassification>(value).is_err());
+        }
     }
 
     #[test]

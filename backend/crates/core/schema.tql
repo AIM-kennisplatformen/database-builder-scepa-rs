@@ -9,6 +9,18 @@ attribute contribution_id sub id;
 attribute affiliation_id sub id;
 attribute publication_event_id sub id;
 
+attribute classification @abstract, value boolean @values(true);
+
+attribute user_persona @abstract, sub classification;
+attribute strategic_overview sub user_persona;
+attribute best_practices sub user_persona;
+attribute target_groups sub user_persona;
+
+attribute kind_of_literature @abstract, sub classification;
+attribute grey_literature sub kind_of_literature;
+attribute scientific_literature sub kind_of_literature;
+attribute project_report sub kind_of_literature;
+
 attribute doi sub id;
 attribute isbn sub id;
 attribute issn sub id;
@@ -31,6 +43,15 @@ entity document,
     owns document_id @key,
     owns pdf_hash @unique,
     owns title @card(1),
+    # classification marker attributes
+    owns user_persona @card(0..3),
+    owns strategic_overview @card(0..1),
+    owns best_practices @card(0..1),
+    owns target_groups @card(0..1),
+    owns kind_of_literature @card(0..1),
+    owns grey_literature @card(0..1),
+    owns scientific_literature @card(0..1),
+    owns project_report @card(0..1),
     plays contribution:work @card(1..),
     plays publication_event:work,
     plays affiliation:evidence;

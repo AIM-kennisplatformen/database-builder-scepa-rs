@@ -10,7 +10,7 @@ use typedb_driver::{
 
 use crate::models::{
     canonical::{CanonicalModel, entities, relations},
-    draft::TeiDocument,
+    draft::{DocumentClassification, TeiDocument},
 };
 use entities::{
     document::{EDocument, TDocument},
@@ -126,6 +126,7 @@ impl TypeDbStore {
             .analyze(
                 "match \
                  $document label document; \
+                 $classification label classification; \
                  $research_paper label research_paper; \
                  $book label book; \
                  $person label person; \
@@ -136,6 +137,14 @@ impl TypeDbStore {
                  $contribution label contribution; \
                  $affiliation label affiliation; \
                  $publication label publication; \
+                 $user_persona label user_persona; \
+                 $kind_of_literature label kind_of_literature; \
+                 $strategic_overview label strategic_overview; \
+                 $best_practices label best_practices; \
+                 $target_groups label target_groups; \
+                 $grey_literature label grey_literature; \
+                 $scientific_literature label scientific_literature; \
+                 $project_report label project_report; \
                  $document_id label document_id; \
                  $pdf_hash label pdf_hash; \
                  $person_id label person_id; \
@@ -320,6 +329,16 @@ impl<S> TypeDbService<S> {
     ) -> eros::Result<CanonicalModel> {
         CanonicalModel::try_from_with_pdf_hash(draft, pdf_hash)
     }
+
+    /// Canonicalises a document with optional operator-authored classification.
+    pub async fn pre_validate_with_classification(
+        &self,
+        draft: &TeiDocument,
+        pdf_hash: &str,
+        classification: &DocumentClassification,
+    ) -> eros::Result<CanonicalModel> {
+        CanonicalModel::try_from_with_classification(draft, pdf_hash, classification)
+    }
 }
 
 impl TypeDbService<TypeDbStore> {
@@ -415,6 +434,16 @@ fn document_insert_query(document: &Arc<EDocument>) -> eros::Result<(String, Giv
         declarations.push("$isbn: string");
         attributes.push("has isbn == $isbn".to_owned());
         values.push(isbn.to_owned().into());
+    }
+    attributes.extend(
+        document
+            .classification()
+            .user_personas
+            .iter()
+            .map(|persona| format!("has {} true", persona.as_str())),
+    );
+    if let Some(kind) = document.classification().literature_kind {
+        attributes.push(format!("has {} true", kind.as_str()));
     }
 
     let query = format!(
@@ -763,8 +792,8 @@ mod tests {
 
     use super::*;
     use crate::models::draft::{
-        Bibliography, Contributor, ContributorRole, Identifier, IdentifierKind, IdentifierScope,
-        PassageLevel,
+        Bibliography, Contributor, ContributorRole, DocumentClassification, Identifier,
+        IdentifierKind, IdentifierScope, LiteratureKind, PassageLevel, UserPersona,
     };
 
     #[derive(Clone, Default)]
@@ -867,6 +896,43 @@ mod tests {
     }
 
     #[test]
+    fn document_insert_uses_boolean_attributes_for_classification() {
+        let classification = DocumentClassification {
+            user_personas: [UserPersona::StrategicOverview, UserPersona::TargetGroups]
+                .into_iter()
+                .collect(),
+            literature_kind: Some(LiteratureKind::ProjectReport),
+        };
+        let canonical = CanonicalModel::try_from_with_classification(
+            &draft(),
+            &"a".repeat(64),
+            &classification,
+        )
+        .unwrap();
+
+        let (query, rows) = document_insert_query(&canonical.document).unwrap();
+        let (_, values) = rows.into_parts();
+
+        assert!(query.contains("has strategic_overview true"));
+        assert!(query.contains("has target_groups true"));
+        assert!(query.contains("has project_report true"));
+        assert_eq!(values[0].len(), 4);
+    }
+
+    #[test]
+    fn empty_classification_adds_no_marker_attributes() {
+        let canonical = CanonicalModel::try_from(&draft()).unwrap();
+        let (query, _) = document_insert_query(&canonical.document).unwrap();
+
+        assert!(!query.contains("strategic_overview"));
+        assert!(!query.contains("best_practices"));
+        assert!(!query.contains("target_groups"));
+        assert!(!query.contains("grey_literature"));
+        assert!(!query.contains("scientific_literature"));
+        assert!(!query.contains("project_report"));
+    }
+
+    #[test]
     fn contribution_insert_links_person_to_document() {
         let canonical = CanonicalModel::try_from(&draft()).unwrap();
         let (query, rows) = contribution_insert_query(canonical.contributions[0].as_ref()).unwrap();
@@ -908,6 +974,21 @@ mod tests {
 
     fn expanded_canonical() -> CanonicalModel {
         CanonicalModel::try_from(&expanded_draft()).unwrap()
+    }
+
+    fn expanded_classified_canonical() -> CanonicalModel {
+        let classification = DocumentClassification {
+            user_personas: [UserPersona::StrategicOverview, UserPersona::BestPractices]
+                .into_iter()
+                .collect(),
+            literature_kind: Some(LiteratureKind::GreyLiterature),
+        };
+        CanonicalModel::try_from_with_classification(
+            &expanded_draft(),
+            &"a".repeat(64),
+            &classification,
+        )
+        .unwrap()
     }
 
     fn expanded_draft() -> TeiDocument {
@@ -985,10 +1066,19 @@ mod tests {
         let service = TypeDbService::from_driver(driver, &database);
         service.ensure_schema().await.unwrap();
 
-        let old = expanded_canonical();
+        let old = expanded_classified_canonical();
         let mut changed_draft = expanded_draft();
         changed_draft.bibliography.title = Some("Corrected title".into());
-        let new = CanonicalModel::try_from(&changed_draft).unwrap();
+        let new_classification = DocumentClassification {
+            user_personas: [UserPersona::TargetGroups].into_iter().collect(),
+            literature_kind: Some(LiteratureKind::ProjectReport),
+        };
+        let new = CanonicalModel::try_from_with_classification(
+            &changed_draft,
+            &"a".repeat(64),
+            &new_classification,
+        )
+        .unwrap();
         let result = async {
             service.execute(&old).await?;
             service.execute_update(&old, &new).await.map(|_| ())
@@ -1010,7 +1100,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires a local TypeDB service and creates a temporary database"]
-    async fn existing_schema_is_migrated_for_stable_relation_ids() {
+    async fn existing_unclassified_schema_is_migrated() {
         let (address, _, username, password) = live_typedb_settings();
         let database = format!("scepa_schema_migration_test_{}", std::process::id());
         let driver = TypeDBDriver::new(
@@ -1032,7 +1122,15 @@ mod tests {
             .replace("attribute publication_event_id sub id;\n", "")
             .replace("    owns contribution_id @unique,\n", "")
             .replace("    owns affiliation_id @unique,\n", "")
-            .replace("    owns publication_event_id @unique,\n", "");
+            .replace("    owns publication_event_id @unique,\n", "")
+            .replace(
+                "attribute classification @abstract, value boolean @values(true);\n\nattribute user_persona @abstract, sub classification;\nattribute strategic_overview sub user_persona;\nattribute best_practices sub user_persona;\nattribute target_groups sub user_persona;\n\nattribute kind_of_literature @abstract, sub classification;\nattribute grey_literature sub kind_of_literature;\nattribute scientific_literature sub kind_of_literature;\nattribute project_report sub kind_of_literature;\n\n",
+                "",
+            )
+            .replace(
+                "    # classification marker attributes\n    owns user_persona @card(0..3),\n    owns strategic_overview @card(0..1),\n    owns best_practices @card(0..1),\n    owns target_groups @card(0..1),\n    owns kind_of_literature @card(0..1),\n    owns grey_literature @card(0..1),\n    owns scientific_literature @card(0..1),\n    owns project_report @card(0..1),\n",
+                "",
+            );
         transaction.query(&old_schema).await.unwrap();
         transaction.commit().await.unwrap();
         let service = TypeDbService::from_driver(driver, &database);

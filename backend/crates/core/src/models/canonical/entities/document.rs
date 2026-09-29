@@ -5,12 +5,14 @@ use std::sync::Arc;
 use crate::models::canonical::relations::{
     affiliation::EAffiliation, contribution::EContribution, publication_event::EPublicationEvent,
 };
+use crate::models::draft::DocumentClassification;
 
 #[enum_dispatch]
 pub trait TDocument: Send + Sync {
     fn document_id(&self) -> &str;
     fn pdf_hash(&self) -> Option<&str>;
     fn title(&self) -> &str;
+    fn classification(&self) -> &DocumentClassification;
     fn entity_type(&self) -> &'static str;
     fn doi(&self) -> Option<&str> {
         None
@@ -28,6 +30,8 @@ pub struct Document {
     pub document_id: String,
     pub pdf_hash: Option<String>,
     pub title: String,
+    #[serde(default)]
+    pub classification: DocumentClassification,
 }
 
 #[derive(bon::Builder)]
@@ -51,6 +55,10 @@ impl TDocument for Document {
         &self.title
     }
 
+    fn classification(&self) -> &DocumentClassification {
+        &self.classification
+    }
+
     fn entity_type(&self) -> &'static str {
         "document"
     }
@@ -68,6 +76,8 @@ pub struct ResearchPaper {
     pub document_id: String,
     pub pdf_hash: Option<String>,
     pub title: String,
+    #[serde(default)]
+    pub classification: DocumentClassification,
     pub doi: Option<String>,
 }
 
@@ -90,6 +100,10 @@ impl TDocument for ResearchPaper {
 
     fn title(&self) -> &str {
         &self.title
+    }
+
+    fn classification(&self) -> &DocumentClassification {
+        &self.classification
     }
 
     fn entity_type(&self) -> &'static str {
@@ -118,6 +132,8 @@ pub struct Book {
     pub document_id: String,
     pub pdf_hash: Option<String>,
     pub title: String,
+    #[serde(default)]
+    pub classification: DocumentClassification,
     pub isbn: Option<String>,
 }
 
@@ -140,6 +156,10 @@ impl TDocument for Book {
 
     fn title(&self) -> &str {
         &self.title
+    }
+
+    fn classification(&self) -> &DocumentClassification {
+        &self.classification
     }
 
     fn entity_type(&self) -> &'static str {
@@ -166,6 +186,8 @@ pub struct Report {
     pub document_id: String,
     pub pdf_hash: Option<String>,
     pub title: String,
+    #[serde(default)]
+    pub classification: DocumentClassification,
 }
 
 #[derive(bon::Builder)]
@@ -187,6 +209,10 @@ impl TDocument for Report {
 
     fn title(&self) -> &str {
         &self.title
+    }
+
+    fn classification(&self) -> &DocumentClassification {
+        &self.classification
     }
 
     fn entity_type(&self) -> &'static str {

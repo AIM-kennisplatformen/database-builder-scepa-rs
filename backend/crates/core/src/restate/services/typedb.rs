@@ -2,7 +2,10 @@ use restate_sdk::prelude::{Context, HandlerResult, Json, TerminalError};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    models::{canonical::CanonicalModel, draft::TeiDocument},
+    models::{
+        canonical::CanonicalModel,
+        draft::{DocumentClassification, TeiDocument},
+    },
     pipeline::{
         FailureDisposition, FailureRecord, PipelinePhase, ReviewArtifact, ReviewStore,
         typedb::{CanonicalUpdateSummary, TypeDbService, TypeDbStore},
@@ -17,6 +20,8 @@ pub struct TypeDbExecuteRequest {
     pub workflow_id: String,
     pub pdf_hash: String,
     pub document: TeiDocument,
+    #[serde(default)]
+    pub classification: DocumentClassification,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -24,7 +29,11 @@ pub struct TypeDbUpdateRequest {
     pub workflow_id: String,
     pub pdf_hash: String,
     pub old_document: TeiDocument,
+    #[serde(default)]
+    pub old_classification: DocumentClassification,
     pub new_document: TeiDocument,
+    #[serde(default)]
+    pub new_classification: DocumentClassification,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -80,7 +89,11 @@ impl TypeDbRestateService {
         let request = request.into_inner();
         let canonical = match self
             .service
-            .pre_validate_with_pdf_hash(&request.document, &request.pdf_hash)
+            .pre_validate_with_classification(
+                &request.document,
+                &request.pdf_hash,
+                &request.classification,
+            )
             .await
         {
             Ok(canonical) => canonical,
@@ -111,12 +124,20 @@ impl TypeDbRestateService {
         let request = request.into_inner();
         let old = self
             .service
-            .pre_validate_with_pdf_hash(&request.old_document, &request.pdf_hash)
+            .pre_validate_with_classification(
+                &request.old_document,
+                &request.pdf_hash,
+                &request.old_classification,
+            )
             .await
             .map_err(|_| TerminalError::new_with_code(422, "Existing document data is invalid"))?;
         let new = match self
             .service
-            .pre_validate_with_pdf_hash(&request.new_document, &request.pdf_hash)
+            .pre_validate_with_classification(
+                &request.new_document,
+                &request.pdf_hash,
+                &request.new_classification,
+            )
             .await
         {
             Ok(canonical) => canonical,

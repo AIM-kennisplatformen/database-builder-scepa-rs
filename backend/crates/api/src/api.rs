@@ -782,6 +782,13 @@ fn validate_artifact_update(
     mut artifact: DraftDocument,
     manual_data: &ManualDocument,
 ) -> Result<(), ApiError> {
+    manual_data.classification.validate().map_err(|error| {
+        api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            error,
+            "Correct the document classification and try again",
+        )
+    })?;
     artifact.manual_data = manual_data.clone();
     artifact.validate_ids().map_err(|error| {
         api_error(
@@ -1338,6 +1345,9 @@ mod tests {
 
         for (name, property) in [
             ("ManualDocument", "bibliography"),
+            ("ManualDocument", "classification"),
+            ("DocumentClassification", "user_personas"),
+            ("DocumentClassification", "literature_kind"),
             ("DraftDocument", "grobid_extraction_data"),
             ("TeiDocument", "id"),
             ("Contributor", "id"),
@@ -1353,6 +1363,7 @@ mod tests {
             ("NewDocumentWorkflowResponse", "stored_pdf"),
             ("UpdateDocumentWorkflowResponse", "changes"),
             ("ResearchPaper", "doi"),
+            ("ResearchPaper", "classification"),
             ("CanonicalUpdateSummary", "contributors_inserted"),
             ("CanonicalMissingField", "path"),
             ("DocumentValidationErrorResponse", "missing_fields"),
@@ -1363,6 +1374,18 @@ mod tests {
                 schemas[name]
             );
         }
+
+        assert_eq!(
+            schemas["UserPersona"]["enum"],
+            serde_json::json!(["strategic_overview", "best_practices", "target_groups"])
+        );
+        assert_eq!(
+            schemas["LiteratureKind"]["enum"],
+            serde_json::json!(["grey_literature", "scientific_literature", "project_report"])
+        );
+        let personas = &schemas["DocumentClassification"]["properties"]["user_personas"];
+        assert_eq!(personas["maxItems"], 3);
+        assert_eq!(personas["uniqueItems"], true);
 
         let published_summary = &schemas["PublishedDocumentSummary"]["properties"];
         for field in ["pdf_hash", "title", "published_at"] {
