@@ -60,7 +60,7 @@ docker compose -f compose.release.yaml up --build
 The stack exposes:
 
 - Axum API: `http://localhost:3000`
-- React UI: `http://localhost:5173`
+- React UI: `http://localhost:5173/upload/`
 - Grobid: `http://localhost:8070`
 - Garage S3 API: `http://localhost:3900`
 - Garage admin API: `http://localhost:3903`
@@ -88,7 +88,7 @@ remaining ports are for administrators and should not be changed to
 
 | Service | Local endpoint |
 | --- | --- |
-| Frontend, including the `/api/` proxy | `http://127.0.0.1:5173` |
+| Frontend, including the `/upload/api/` proxy | `http://127.0.0.1:5173/upload/` |
 | API, for direct diagnostics | `http://127.0.0.1:3000` |
 | Literature MCP | `http://127.0.0.1:8002/mcp` |
 | TypeDB gRPC | `127.0.0.1:1729` |
@@ -137,6 +137,47 @@ deployment with:
 ```bash
 docker compose -f compose.release.yaml config
 ```
+
+### Single-host HTTPS routing
+
+The frontend uses `/upload/` as its base path in development and release builds.
+Local development serves the upload page at
+`http://localhost:5173/upload/`; a deployment preserves the same path at
+`https://scepakp.mads-han.src.surf-hosted.nl/upload/`.
+
+The release Nginx container accepts `/upload/` directly and proxies
+`/upload/api/` to the API container. Caddy must therefore preserve the prefix
+rather than stripping it:
+
+```caddy
+scepakp.mads-han.src.surf-hosted.nl {
+    encode zstd gzip
+
+    handle /mcp* {
+        reverse_proxy 127.0.0.1:8002 {
+            flush_interval -1
+        }
+    }
+
+    redir /upload /upload/ 308
+
+    handle /upload/* {
+        basic_auth {
+            operator REPLACE_WITH_CADDY_PASSWORD_HASH
+        }
+
+        reverse_proxy 127.0.0.1:5173
+    }
+
+    handle {
+        reverse_proxy 127.0.0.1:10090
+    }
+}
+```
+
+This leaves Studio at `/` with its existing `/api/` and Socket.IO routes,
+serves the bearer-token-protected literature MCP at `/mcp`, and keeps the SCEPA
+operator UI and its API under the Basic-authenticated `/upload/` path.
 
 ## API
 

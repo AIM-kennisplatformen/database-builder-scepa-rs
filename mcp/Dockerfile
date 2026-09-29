@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM lukemathwalker/cargo-chef:0.1.78-rust-1.97-bookworm AS chef
+FROM lukemathwalker/cargo-chef:0.1.78-rust-1.97-trixie AS chef
 
 WORKDIR /app
 
@@ -37,10 +37,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --locked --release --package scepa-mcp \
     && cp target/release/scepa-mcp /usr/local/bin/scepa-mcp
 
-FROM debian:bookworm-slim AS release
+FROM debian:trixie-slim AS release
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates \
+    && apt-get install --yes --no-install-recommends ca-certificates libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/local/bin/scepa-mcp /usr/local/bin/scepa-mcp

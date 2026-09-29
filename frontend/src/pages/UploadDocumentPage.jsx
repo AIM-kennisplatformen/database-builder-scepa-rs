@@ -1,6 +1,7 @@
 import { ChevronLeft, File, Loader2, Upload, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
+import { apiUrl } from "../utils/api";
 
 export default function UploadDocumentPage() {
   const [file, setFile] = useState(null);
@@ -31,7 +32,7 @@ export default function UploadDocumentPage() {
     setUploading(true);
     setError("");
     try {
-      const response = await fetch("/api/pdfs", {
+      const response = await fetch(apiUrl("/pdfs"), {
         method: "POST",
         headers: {
           "Content-Type": allowedFileTypes.includes(file.type)

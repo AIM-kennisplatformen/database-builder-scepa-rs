@@ -6,6 +6,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { TEXT_REGEX, isValidField } from "../utils/validation";
 import { Plus } from "lucide-react";
 import { AUTHOR_FIELDS } from "../components/AuthorDisplay";
+import { apiUrl } from "../utils/api";
 
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -321,7 +322,7 @@ export default function UpdateDocumentPage({}) {
 
   // GET /documents/{pdf_hash} -> { artifact: <draft fields> }
   function loadNormalDocument() {
-    fetchJson(`/api/documents/${pdf_hash}`)
+    fetchJson(apiUrl(`/documents/${pdf_hash}`))
       .then((res) =>
         applyDocument({ artifact: res.artifact, pdfHash: pdf_hash }),
       )
@@ -330,7 +331,7 @@ export default function UpdateDocumentPage({}) {
 
   // GET /documents/requiring-fixing/{case_id} -> { case, draft: { pdf_hash, ...draft fields } }
   function loadFixingDocument() {
-    fetchJson(`/api/documents/requiring-fixing/${pdf_hash}`)
+    fetchJson(apiUrl(`/documents/requiring-fixing/${pdf_hash}`))
       .then((res) =>
         applyDocument({
           artifact: res.draft,
@@ -411,8 +412,8 @@ export default function UpdateDocumentPage({}) {
   // For fixing documents the route param is the case id.
   function saveDocument(manualDocument) {
     const url = requiresFixing
-      ? `/api/documents/requiring-fixing/${pdf_hash}`
-      : `/api/documents/${pdf_hash}`;
+      ? apiUrl(`/documents/requiring-fixing/${pdf_hash}`)
+      : apiUrl(`/documents/${pdf_hash}`);
     const body = JSON.stringify(
       requiresFixing
         ? { manual_data: manualDocument, enrich: false }
@@ -558,7 +559,7 @@ export default function UpdateDocumentPage({}) {
   return (
     <div className="flex h-screen w-full py-6 mt-1">
       <div className="w-2/3 h-full overflow-y-auto border-r border-border">
-        {pdfHash && <PdfViewer file={`/api/pdfs/${pdfHash}`} />}
+        {pdfHash && <PdfViewer file={apiUrl(`/pdfs/${pdfHash}`)} />}
       </div>
       <div className="w-1/3 h-full overflow-y-auto bg-white p-2 text-black">
         {missingFields.length > 0 && (
