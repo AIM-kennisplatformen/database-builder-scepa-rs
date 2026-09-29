@@ -56,6 +56,14 @@ an `Idempotency-Key` header; retrying with the same key generates the same IDs.
 Publisher, journal, and affiliation values are represented as nested objects
 instead of plain strings.
 
+Manual data also contains an optional `classification` object. `user_personas`
+accepts unique values from `strategic_overview`, `best_practices`, and
+`target_groups`; `literature_kind` accepts `grey_literature`,
+`scientific_literature`, `project_report`, or `null`. Uploads do not infer these
+values and remain valid while unclassified. TypeDB stores selected values as
+boolean marker attributes owned by the document under the abstract
+`classification` hierarchy.
+
 ## Database import and export
 
 TypeDB Console must be installed and the `typedb` executable must be available

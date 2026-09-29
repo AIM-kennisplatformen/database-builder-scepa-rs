@@ -134,6 +134,11 @@ fixed data through `UpdateDocumentWorkflow`, respectively. External enrichment
 is represented by the repair contract but intentionally returns `501` until an
 enrichment service exists.
 
+The shared edit and repair form can manually classify a document for any of the
+`strategic_overview`, `best_practices`, and `target_groups` personas and as
+`grey_literature`, `scientific_literature`, or `project_report`. Classification
+is optional and is never inferred during PDF ingestion.
+
 ## Pipeline CLI
 
 The CLI sends uploads to `SCEPA_API_URL` (default `http://localhost:3000`) and
@@ -157,7 +162,7 @@ in the separate `scepa-cli` crate.
 
 The self-contained project under `mcp/` exposes authenticated Streamable HTTP at
 `/mcp`. `search_literature` first obtains eligible PDF hashes from TypeDB using
-publication-date, document-type, and organization filters, similarity-searches
+publication-date, document-type, classification, and organization filters, similarity-searches
 `4 × top_k` source passages in Qdrant, resolves their linked combined passages,
 and reranks them locally. Search responses always include bibliographic metadata
 as deterministic IEEE references with passages grouped by document. PDF hashes
