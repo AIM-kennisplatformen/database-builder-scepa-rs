@@ -117,7 +117,7 @@ services:
       - "${TYPEDB_GRPC_PORT}:1729"
       - "${TYPEDB_HTTP_PORT}:8000"
     volumes:
-      - ./.data/typedb:/var/lib/typedb/data
+      - typedb_data:/var/lib/typedb/data
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/1729'"]
       interval: 5s
@@ -135,7 +135,7 @@ services:
     ports:
       - "${POSTGRES_PORT}:5432"
     volumes:
-      - ./.data/postgres:/var/lib/postgresql
+      - postgres_data:/var/lib/postgresql
       - ./backend/crates/core/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
@@ -150,7 +150,7 @@ services:
       - "${QDRANT_HTTP_PORT:-6333}:6333"
       - "${QDRANT_GRPC_PORT:-6334}:6334"
     volumes:
-      - ./.data/qdrant:/qdrant/storage
+      - qdrant_data:/qdrant/storage
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6334'"]
       interval: 5s
@@ -171,8 +171,8 @@ services:
       - "${GARAGE_ADMIN_PORT}:3903"
     volumes:
       - ./garage.toml:/etc/garage.toml:ro
-      - ./.data/garage/meta:/var/lib/garage/meta
-      - ./.data/garage/data:/var/lib/garage/data
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
     healthcheck:
       test: ["CMD", "/garage", "status"]
       interval: 5s
@@ -206,7 +206,7 @@ services:
       - "${RESTATE_ADMIN_PORT}:9070"
       - "${RESTATE_FABRIC_PORT}:5122"
     volumes:
-      - ./.data/restate:/restate-data
+      - restate_data:/restate-data
     healthcheck:
       test: ["CMD", "restatectl", "status"]
       interval: 5s
@@ -222,3 +222,9 @@ volumes:
   frontend_node_modules:
   mcp_model_cache:
   mcp_target:
+  garage_data:
+  garage_meta:
+  postgres_data:
+  qdrant_data:
+  restate_data:
+  typedb_data:
