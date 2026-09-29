@@ -452,6 +452,22 @@ pub fn filter_query(filters: &LiteratureFilters) -> String {
                 .map(|kind| format!("$document isa! {}", kind.label())),
         ));
     }
+    if !filters.user_personas.is_empty() {
+        patterns.push(or_patterns(
+            filters
+                .user_personas
+                .iter()
+                .map(|persona| format!("$document has {} true", persona.label())),
+        ));
+    }
+    if !filters.literature_kinds.is_empty() {
+        patterns.push(or_patterns(
+            filters
+                .literature_kinds
+                .iter()
+                .map(|kind| format!("$document has {} true", kind.label())),
+        ));
+    }
     if let Some(range) = &filters.publication_date {
         patterns.push(
             "$publication isa publication, links (work: $document), has publication_date $date"
@@ -568,7 +584,8 @@ mod tests {
 
     use super::*;
     use crate::models::{
-        DocumentTypeFilter, OrganizationFilter, OrganizationTypeFilter, PublicationDateFilter,
+        DocumentTypeFilter, LiteratureKindFilter, OrganizationFilter, OrganizationTypeFilter,
+        PublicationDateFilter, UserPersonaFilter,
     };
 
     #[test]
@@ -579,6 +596,11 @@ mod tests {
                 to: Some(NaiveDate::from_ymd_opt(2024, 12, 31).unwrap()),
             }),
             document_types: vec![DocumentTypeFilter::ResearchPaper],
+            user_personas: vec![
+                UserPersonaFilter::StrategicOverview,
+                UserPersonaFilter::TargetGroups,
+            ],
+            literature_kinds: vec![LiteratureKindFilter::ProjectReport],
             organization: Some(OrganizationFilter {
                 names: vec!["ACME\"; delete $x".into()],
                 roles: vec![OrganizationRoleFilter::Affiliation],
@@ -587,8 +609,45 @@ mod tests {
         };
         let query = filter_query(&filters);
         assert!(query.contains("isa! research_paper"));
+        assert!(query.contains("has strategic_overview true"));
+        assert!(query.contains("has target_groups true"));
+        assert!(query.contains("has project_report true"));
         assert!(query.contains("isa institution"));
         assert!(query.contains("2025-01-01T00:00:00"));
         assert!(query.contains(r#"contains "ACME\"; delete $x""#));
+    }
+
+    #[test]
+    fn empty_classification_arrays_add_no_restriction() {
+        let query = filter_query(&LiteratureFilters::default());
+
+        assert!(!query.contains("strategic_overview"));
+        assert!(!query.contains("best_practices"));
+        assert!(!query.contains("target_groups"));
+        assert!(!query.contains("grey_literature"));
+        assert!(!query.contains("scientific_literature"));
+        assert!(!query.contains("project_report"));
+    }
+
+    #[test]
+    fn classification_categories_are_anded_and_values_are_ored() {
+        let filters = LiteratureFilters {
+            user_personas: vec![
+                UserPersonaFilter::StrategicOverview,
+                UserPersonaFilter::BestPractices,
+            ],
+            literature_kinds: vec![
+                LiteratureKindFilter::GreyLiterature,
+                LiteratureKindFilter::ScientificLiterature,
+            ],
+            ..LiteratureFilters::default()
+        };
+
+        let query = filter_query(&filters);
+
+        assert!(query.contains("has strategic_overview true"));
+        assert!(query.contains("or { $document has best_practices true"));
+        assert!(query.contains("has grey_literature true"));
+        assert!(query.contains("or { $document has scientific_literature true"));
     }
 }

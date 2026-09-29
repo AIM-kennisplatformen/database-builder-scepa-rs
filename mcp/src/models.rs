@@ -21,6 +21,42 @@ pub enum DocumentTypeFilter {
     Book,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UserPersonaFilter {
+    StrategicOverview,
+    BestPractices,
+    TargetGroups,
+}
+
+impl UserPersonaFilter {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::StrategicOverview => "strategic_overview",
+            Self::BestPractices => "best_practices",
+            Self::TargetGroups => "target_groups",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LiteratureKindFilter {
+    GreyLiterature,
+    ScientificLiterature,
+    ProjectReport,
+}
+
+impl LiteratureKindFilter {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::GreyLiterature => "grey_literature",
+            Self::ScientificLiterature => "scientific_literature",
+            Self::ProjectReport => "project_report",
+        }
+    }
+}
+
 impl DocumentTypeFilter {
     pub fn label(self) -> &'static str {
         match self {
@@ -90,6 +126,10 @@ pub struct LiteratureFilters {
     pub publication_date: Option<PublicationDateFilter>,
     #[serde(default)]
     pub document_types: Vec<DocumentTypeFilter>,
+    #[serde(default)]
+    pub user_personas: Vec<UserPersonaFilter>,
+    #[serde(default)]
+    pub literature_kinds: Vec<LiteratureKindFilter>,
     pub organization: Option<OrganizationFilter>,
 }
 

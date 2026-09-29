@@ -9,8 +9,10 @@ The server exposes:
 - Streamable HTTP MCP at `/mcp`, protected by a static bearer token.
 - `search_literature`, which filters document hashes in TypeDB, searches source
   passages in Qdrant, expands their linked combined passages, and reranks them
-  with a local ONNX cross-encoder. Its optional publication and organization
-  filters are flat tool parameters for broad model compatibility. Every search
+  with a local ONNX cross-encoder. Its optional publication, classification,
+  and organization filters are flat tool parameters for broad model compatibility.
+  Persona and literature-kind values use OR within their category; filter
+  categories combine with AND, and empty arrays impose no restriction. Every search
   groups relevant passages by document and includes a deterministic
   `ieee_reference` for each represented document. PDF hashes and reranker scores
   remain internal to retrieval and are not serialized in tool responses. The

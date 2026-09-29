@@ -35,8 +35,9 @@ use crate::reranker::OnnxReranker;
 use crate::{
     embedding::EmbeddingClient,
     models::{
-        DocumentTypeFilter, LiteratureFilters, LiteratureSearchResponse, OrganizationFilter,
-        OrganizationRoleFilter, OrganizationTypeFilter, PublicationDateFilter,
+        DocumentTypeFilter, LiteratureFilters, LiteratureKindFilter, LiteratureSearchResponse,
+        OrganizationFilter, OrganizationRoleFilter, OrganizationTypeFilter, PublicationDateFilter,
+        UserPersonaFilter,
     },
     qdrant::PassageStore,
     search::{LiteratureSearchService, SearchError},
@@ -63,6 +64,12 @@ struct SearchLiteratureParameters {
     /// Exact document types to include: document (base type only), research_paper, report, or book. Values are ORed; omit or pass an empty list for no document-type restriction.
     #[serde(default)]
     document_types: Vec<DocumentTypeFilter>,
+    /// User personas to include: strategic_overview, best_practices, or target_groups. Values are ORed; omit or pass an empty list for no persona restriction.
+    #[serde(default)]
+    user_personas: Vec<UserPersonaFilter>,
+    /// Literature kinds to include: grey_literature, scientific_literature, or project_report. Values are ORed; omit or pass an empty list for no literature-kind restriction.
+    #[serde(default)]
+    literature_kinds: Vec<LiteratureKindFilter>,
     /// Organization-name substrings associated with a document. Values are ORed; omit or pass an empty list for no name restriction.
     #[serde(default)]
     organization_names: Vec<String>,
@@ -99,6 +106,8 @@ impl SearchLiteratureParameters {
         LiteratureFilters {
             publication_date,
             document_types: self.document_types.clone(),
+            user_personas: self.user_personas.clone(),
+            literature_kinds: self.literature_kinds.clone(),
             organization,
         }
     }
@@ -116,11 +125,13 @@ impl LiteratureMcp {
             publication_date_from is an optional inclusive YYYY-MM-DD lower bound.
             publication_date_to is an optional inclusive YYYY-MM-DD upper bound.
             document_types accepts document, research_paper, report, and book.
+            user_personas accepts strategic_overview, best_practices, and target_groups.
+            literature_kinds accepts grey_literature, scientific_literature, and project_report.
             organization_names accepts organization-name substrings.
             organization_roles accepts any, publisher, affiliation, and contributor.
             organization_types accepts organization, institution, government_institution, educational_institution, nonprofit_institution, and publisher.
             Filter categories use AND while values within a category use OR.
-            Only set publication or organization filters when the user requests them.
+            Only set publication, classification, or organization filters when the user requests them.
 
         Output arguments:
             sources groups relevant passages by document in ranked order.
@@ -321,6 +332,8 @@ mod tests {
             publication_date_from: chrono::NaiveDate::from_ymd_opt(2020, 1, 1),
             publication_date_to: None,
             document_types: vec![DocumentTypeFilter::ResearchPaper],
+            user_personas: vec![UserPersonaFilter::BestPractices],
+            literature_kinds: vec![LiteratureKindFilter::ScientificLiterature],
             organization_names: vec!["Example University".into()],
             organization_roles: vec![OrganizationRoleFilter::Affiliation],
             organization_types: vec![OrganizationTypeFilter::EducationalInstitution],
@@ -334,6 +347,8 @@ mod tests {
                     to: None,
                 }),
                 document_types: vec![DocumentTypeFilter::ResearchPaper],
+                user_personas: vec![UserPersonaFilter::BestPractices],
+                literature_kinds: vec![LiteratureKindFilter::ScientificLiterature],
                 organization: Some(OrganizationFilter {
                     names: vec!["Example University".into()],
                     roles: vec![OrganizationRoleFilter::Affiliation],
@@ -359,6 +374,8 @@ mod tests {
             "publication_date_from",
             "publication_date_to",
             "document_types",
+            "user_personas",
+            "literature_kinds",
             "organization_names",
             "organization_roles",
             "organization_types",
@@ -381,6 +398,14 @@ mod tests {
                 .get("description")
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|description| description.contains("reranked passages"))
+        );
+        assert_eq!(
+            schema["$defs"]["UserPersonaFilter"]["enum"],
+            serde_json::json!(["strategic_overview", "best_practices", "target_groups"])
+        );
+        assert_eq!(
+            schema["$defs"]["LiteratureKindFilter"]["enum"],
+            serde_json::json!(["grey_literature", "scientific_literature", "project_report"])
         );
     }
 
