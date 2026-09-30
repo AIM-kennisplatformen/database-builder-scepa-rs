@@ -296,6 +296,7 @@ export default function UpdateDocumentPage({}) {
     user_personas: [],
     literature_kind: null,
   });
+  const [description, setDescription] = useState("");
   const pendingSaveRef = useRef(null);
 
   useEffect(() => {
@@ -369,7 +370,9 @@ export default function UpdateDocumentPage({}) {
     }
 
     const bibliography = effectiveBibliography(document.artifact);
-    const classification = document.artifact?.manual_data?.classification;
+    const manualData = document.artifact?.manual_data;
+    const classification = manualData?.classification;
+    setDescription(manualData?.description ?? "");
     setClassificationData({
       user_personas: classification?.user_personas ?? [],
       literature_kind: classification?.literature_kind ?? null,
@@ -447,6 +450,7 @@ export default function UpdateDocumentPage({}) {
     bibliographyFieldsData,
     contributorsFieldsData,
     classificationData,
+    description,
   ) {
     //check if data arrays are empty
     const hasBibliographyData = Object.values(bibliographyFieldsData).some(
@@ -541,7 +545,11 @@ export default function UpdateDocumentPage({}) {
 
     setIsSaving(true);
 
-    saveDocument({ bibliography, classification: classificationData })
+    saveDocument({
+      description: sanitizeText(description),
+      bibliography,
+      classification: classificationData,
+    })
       .then((response) => {
         //handle the errors like in the uploadPage
         if (!response.ok) {
@@ -586,6 +594,16 @@ export default function UpdateDocumentPage({}) {
         )}
         {bibliography && (
           <div className="flex flex-col gap-6">
+            <label className="flex flex-col gap-1 text-sm text-primary">
+              <span className="font-medium">Description</span>
+              <textarea
+                className="min-h-24 resize-y rounded border border-border px-2 py-1 text-black"
+                placeholder="Add context about this document"
+                value={description}
+                disabled={isSaving}
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </label>
             <div className="flex flex-col gap-4">
               <div
                 className="flex flex-row gap-1 cursor-pointer select-none"
@@ -793,6 +811,7 @@ export default function UpdateDocumentPage({}) {
               bibliographyFieldsData,
               contributorsFieldsData,
               classificationData,
+              description,
             )
           }
         >
