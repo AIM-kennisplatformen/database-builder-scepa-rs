@@ -1,11 +1,14 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use async_trait::async_trait;
 use thiserror::Error;
 
 use crate::{
     embedding::EmbeddingClient,
-    models::{LiteratureFilters, LiteratureResult, LiteratureSearchResponse},
+    models::{
+        CombinedPassageCandidate, DocumentMetadata, LiteratureFilters, LiteratureSearchResponse,
+        LiteratureSource,
+    },
     qdrant::PassageStore,
     reranker::OnnxReranker,
     typedb::{MetadataStore, validate_filters},
@@ -64,9 +67,7 @@ impl LiteratureSearchService {
         let eligible = self.metadata.eligible_pdf_hashes(filters).await?;
         if eligible.is_empty() {
             return Ok(LiteratureSearchResponse {
-                results: Vec::new(),
-                usage_note: usage_note().into(),
-                metadata_by_pdf_hash: Default::default(),
+                sources: Vec::new(),
             });
         }
         let query_vector = self.embeddings.embed_query(query).await?;
@@ -90,25 +91,16 @@ impl LiteratureSearchService {
                 candidates.len()
             )));
         }
-        let results = rank_candidates(candidates, scores, top_k)
-            .into_iter()
-            .map(|(candidate, score)| LiteratureResult {
-                text: candidate.text,
-                pdf_hash: candidate.pdf_hash,
-                score,
-            })
-            .collect::<Vec<_>>();
-        let hashes = results
+        let ranked = rank_candidates(candidates, scores, top_k);
+        let hashes = ranked
             .iter()
-            .map(|result| result.pdf_hash.clone())
+            .map(|(candidate, _)| candidate.pdf_hash.clone())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
         let metadata_by_pdf_hash = self.metadata.document_metadata(&hashes).await?;
         Ok(LiteratureSearchResponse {
-            results,
-            usage_note: usage_note().into(),
-            metadata_by_pdf_hash,
+            sources: group_sources(ranked, &metadata_by_pdf_hash)?,
         })
     }
 }
@@ -122,15 +114,11 @@ pub fn validate_top_k(top_k: usize) -> Result<(), SearchError> {
     Ok(())
 }
 
-fn usage_note() -> &'static str {
-    "pdf_hash is an opaque key that associates each passage with its entry in metadata_by_pdf_hash; it is not a user-facing citation or document identifier."
-}
-
 fn rank_candidates(
-    candidates: Vec<crate::models::CombinedPassageCandidate>,
+    candidates: Vec<CombinedPassageCandidate>,
     scores: Vec<f32>,
     limit: usize,
-) -> Vec<(crate::models::CombinedPassageCandidate, f32)> {
+) -> Vec<(CombinedPassageCandidate, f32)> {
     let mut ranked = candidates.into_iter().zip(scores).collect::<Vec<_>>();
     ranked.sort_by(|(left, left_score), (right, right_score)| {
         right_score
@@ -140,11 +128,50 @@ fn rank_candidates(
     ranked.into_iter().take(limit).collect()
 }
 
+fn group_sources(
+    ranked: Vec<(CombinedPassageCandidate, f32)>,
+    metadata_by_pdf_hash: &BTreeMap<String, DocumentMetadata>,
+) -> Result<Vec<LiteratureSource>, SearchError> {
+    let mut source_indexes = BTreeMap::<String, usize>::new();
+    let mut sources = Vec::<LiteratureSource>::new();
+
+    for (candidate, _) in ranked {
+        if let Some(index) = source_indexes.get(&candidate.pdf_hash).copied() {
+            sources[index].passages.push(candidate.text);
+            continue;
+        }
+
+        let metadata = metadata_by_pdf_hash
+            .get(&candidate.pdf_hash)
+            .ok_or_else(|| {
+                SearchError::TypeDb(
+                    "retrieved evidence is missing required bibliographic metadata".into(),
+                )
+            })?;
+        if metadata.ieee_reference.trim().is_empty() {
+            return Err(SearchError::TypeDb(
+                "retrieved evidence has an empty IEEE reference".into(),
+            ));
+        }
+
+        source_indexes.insert(candidate.pdf_hash, sources.len());
+        sources.push(LiteratureSource {
+            ieee_reference: metadata.ieee_reference.clone(),
+            description: metadata.description.clone(),
+            passages: vec![candidate.text],
+        });
+    }
+
+    Ok(sources)
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::models::CombinedPassageCandidate;
+    use std::collections::BTreeMap;
 
-    use super::rank_candidates;
+    use crate::models::{CombinedPassageCandidate, DocumentMetadata};
+
+    use super::{group_sources, rank_candidates};
 
     #[test]
     fn reranked_candidates_are_limited_with_a_stable_tie_break() {
@@ -165,5 +192,75 @@ mod tests {
                 .collect::<Vec<_>>(),
             [("a".into(), 0.9), ("c".into(), 0.9)]
         );
+    }
+
+    fn metadata(reference: &str) -> DocumentMetadata {
+        DocumentMetadata {
+            document_id: "document".into(),
+            document_type: "report".into(),
+            title: "Title".into(),
+            description: None,
+            ieee_reference: reference.into(),
+            doi: None,
+            isbn: Vec::new(),
+            persons: Vec::new(),
+            organizations: Vec::new(),
+            contributors: Vec::new(),
+            affiliations: Vec::new(),
+            publication_events: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn passages_are_grouped_by_document_in_first_ranked_order() {
+        let candidate = |id: &str, hash: &str, text: &str| CombinedPassageCandidate {
+            point_id: id.into(),
+            pdf_hash: hash.into(),
+            text: text.into(),
+        };
+        let ranked = vec![
+            (
+                candidate("1", "second", "Second document first passage"),
+                0.9,
+            ),
+            (candidate("2", "first", "First document passage"), 0.8),
+            (
+                candidate("3", "second", "Second document next passage"),
+                0.7,
+            ),
+        ];
+        let metadata_by_pdf_hash = BTreeMap::from([
+            ("first".into(), metadata("First reference.")),
+            ("second".into(), metadata("Second reference.")),
+        ]);
+
+        let sources = group_sources(ranked, &metadata_by_pdf_hash).unwrap();
+
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].ieee_reference, "Second reference.");
+        assert_eq!(
+            sources[0].passages,
+            [
+                "Second document first passage",
+                "Second document next passage"
+            ]
+        );
+        assert_eq!(sources[1].ieee_reference, "First reference.");
+    }
+
+    #[test]
+    fn grouping_rejects_evidence_without_a_usable_reference() {
+        let candidate = CombinedPassageCandidate {
+            point_id: "1".into(),
+            pdf_hash: "missing".into(),
+            text: "Evidence".into(),
+        };
+
+        let missing = group_sources(vec![(candidate.clone(), 0.9)], &BTreeMap::new());
+        assert!(missing.is_err());
+
+        let empty_metadata = BTreeMap::from([("missing".into(), metadata("  "))]);
+        let empty = group_sources(vec![(candidate, 0.9)], &empty_metadata);
+        assert!(empty.is_err());
     }
 }

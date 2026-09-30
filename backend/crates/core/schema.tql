@@ -9,12 +9,20 @@ attribute contribution_id sub id;
 attribute affiliation_id sub id;
 attribute publication_event_id sub id;
 
+attribute classification @abstract, value boolean @values(true);
+
+attribute user_persona @abstract, sub classification;
+attribute strategic_overview sub user_persona;
+attribute best_practices sub user_persona;
+attribute target_groups sub user_persona;
+
 attribute doi sub id;
 attribute isbn sub id;
 attribute issn sub id;
 attribute ror_id sub id;
 
 attribute title, value string;
+attribute description, value string;
 attribute pdf_hash, value string;
 
 attribute publication_date, value datetime;
@@ -31,17 +39,21 @@ entity document,
     owns document_id @key,
     owns pdf_hash @unique,
     owns title @card(1),
+    owns description @card(0..1),
+    owns doi @unique,
+    owns isbn @unique @card(0..),
+    # user-persona marker attributes
+    owns user_persona @card(0..3),
+    owns strategic_overview @card(0..1),
+    owns best_practices @card(0..1),
+    owns target_groups @card(0..1),
     plays contribution:work @card(1..),
     plays publication_event:work,
     plays affiliation:evidence;
 
-entity research_paper sub document,
-    owns doi @unique;
-
-entity report sub document;
-
-entity book sub document,
-    owns isbn @unique @card(0..);
+entity grey_literature sub document;
+entity scientific_literature sub document;
+entity project_report sub document;
 
 entity person,
     owns person_id @key,

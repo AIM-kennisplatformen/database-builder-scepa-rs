@@ -36,7 +36,7 @@ use crate::{
     embedding::EmbeddingClient,
     models::{
         DocumentTypeFilter, LiteratureFilters, LiteratureSearchResponse, OrganizationFilter,
-        OrganizationRoleFilter, OrganizationTypeFilter, PublicationDateFilter,
+        OrganizationRoleFilter, OrganizationTypeFilter, PublicationDateFilter, UserPersonaFilter,
     },
     qdrant::PassageStore,
     search::{LiteratureSearchService, SearchError},
@@ -60,9 +60,12 @@ struct SearchLiteratureParameters {
     publication_date_from: Option<chrono::NaiveDate>,
     /// Inclusive publication end date in YYYY-MM-DD format. Omit it unless the user requested an upper date bound.
     publication_date_to: Option<chrono::NaiveDate>,
-    /// Exact document types to include: document (base type only), research_paper, report, or book. Values are ORed; omit or pass an empty list for no document-type restriction.
+    /// Exact document types to include: document (unclassified base type only), grey_literature, scientific_literature, or project_report. Values are ORed; omit or pass an empty list for no document-type restriction.
     #[serde(default)]
     document_types: Vec<DocumentTypeFilter>,
+    /// User personas to include: strategic_overview, best_practices, or target_groups. Values are ORed; omit or pass an empty list for no persona restriction.
+    #[serde(default)]
+    user_personas: Vec<UserPersonaFilter>,
     /// Organization-name substrings associated with a document. Values are ORed; omit or pass an empty list for no name restriction.
     #[serde(default)]
     organization_names: Vec<String>,
@@ -99,6 +102,7 @@ impl SearchLiteratureParameters {
         LiteratureFilters {
             publication_date,
             document_types: self.document_types.clone(),
+            user_personas: self.user_personas.clone(),
             organization,
         }
     }
@@ -115,18 +119,18 @@ impl LiteratureMcp {
             top_k is the result limit from 1 through 50 and defaults to 30.
             publication_date_from is an optional inclusive YYYY-MM-DD lower bound.
             publication_date_to is an optional inclusive YYYY-MM-DD upper bound.
-            document_types accepts document, research_paper, report, and book.
+            document_types accepts document, grey_literature, scientific_literature, and project_report.
+            user_personas accepts strategic_overview, best_practices, and target_groups.
             organization_names accepts organization-name substrings.
             organization_roles accepts any, publisher, affiliation, and contributor.
             organization_types accepts organization, institution, government_institution, educational_institution, nonprofit_institution, and publisher.
             Filter categories use AND while values within a category use OR.
-            Only set publication or organization filters when the user requests them.
+            Only set publication, classification, or organization filters when the user requests them.
 
         Output arguments:
-            results contains reranked passage text, an opaque pdf_hash, and an internal score from 0.0 through 1.0.
-            metadata_by_pdf_hash contains bibliographic metadata and ieee_reference citations keyed by pdf_hash.
-            usage_note explains restrictions on internal fields.
-            Copy ieee_reference verbatim; scores and pdf_hash values must never be shown to the user.
+            sources groups relevant passages by document in ranked order.
+            Each source contains an ieee_reference generated from bibliographic metadata and its relevant passages.
+            Select only the sources used in the answer and copy their ieee_reference values verbatim into the references section.
         "#)]
     async fn search_literature(
         &self,
@@ -149,10 +153,9 @@ impl LiteratureMcp {
     name = "scepa-literature",
     version = "0.1.0",
     instructions = r#"
-    Use search_literature to retrieve evidence passages and their bibliographic metadata.
-    Copy ieee_reference verbatim for citations.
-    Treat pdf_hash values only as opaque keys that associate passages with metadata; never present them as citations or document identifiers.
-    Use scores only to assess the relative relevance of returned passages; never show scores to the user.
+    Use search_literature to retrieve evidence passages grouped by source.
+    Cite only sources whose passages support the answer, and copy each selected source's ieee_reference verbatim.
+    Assign citation numbers after selecting the sources used in the answer.
     "#
 )]
 impl ServerHandler for LiteratureMcp {}
@@ -217,6 +220,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let handler = LiteratureMcp { search };
     let config = StreamableHttpServerConfig::default()
+        .disable_allowed_hosts()
         .with_legacy_session_mode(false)
         .with_json_response(true);
     let mcp_service = StreamableHttpService::new(
@@ -321,7 +325,8 @@ mod tests {
             top_k: DEFAULT_TOP_K,
             publication_date_from: chrono::NaiveDate::from_ymd_opt(2020, 1, 1),
             publication_date_to: None,
-            document_types: vec![DocumentTypeFilter::ResearchPaper],
+            document_types: vec![DocumentTypeFilter::ScientificLiterature],
+            user_personas: vec![UserPersonaFilter::BestPractices],
             organization_names: vec!["Example University".into()],
             organization_roles: vec![OrganizationRoleFilter::Affiliation],
             organization_types: vec![OrganizationTypeFilter::EducationalInstitution],
@@ -334,7 +339,8 @@ mod tests {
                     from: chrono::NaiveDate::from_ymd_opt(2020, 1, 1),
                     to: None,
                 }),
-                document_types: vec![DocumentTypeFilter::ResearchPaper],
+                document_types: vec![DocumentTypeFilter::ScientificLiterature],
+                user_personas: vec![UserPersonaFilter::BestPractices],
                 organization: Some(OrganizationFilter {
                     names: vec!["Example University".into()],
                     roles: vec![OrganizationRoleFilter::Affiliation],
@@ -360,6 +366,7 @@ mod tests {
             "publication_date_from",
             "publication_date_to",
             "document_types",
+            "user_personas",
             "organization_names",
             "organization_roles",
             "organization_types",
@@ -383,6 +390,57 @@ mod tests {
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|description| description.contains("reranked passages"))
         );
+        for (parameter, expected_values) in [
+            (
+                "document_types",
+                serde_json::json!([
+                    "document",
+                    "grey_literature",
+                    "scientific_literature",
+                    "project_report"
+                ]),
+            ),
+            (
+                "user_personas",
+                serde_json::json!(["strategic_overview", "best_practices", "target_groups"]),
+            ),
+            (
+                "organization_roles",
+                serde_json::json!(["any", "publisher", "affiliation", "contributor"]),
+            ),
+            (
+                "organization_types",
+                serde_json::json!([
+                    "organization",
+                    "institution",
+                    "government_institution",
+                    "educational_institution",
+                    "nonprofit_institution",
+                    "publisher"
+                ]),
+            ),
+        ] {
+            let items = &properties[parameter]["items"];
+            let actual_values = items.get("enum").cloned().or_else(|| {
+                items.get("oneOf")?.as_array().map(|variants| {
+                    serde_json::Value::Array(
+                        variants
+                            .iter()
+                            .filter_map(|variant| variant.get("const").cloned())
+                            .collect(),
+                    )
+                })
+            });
+            assert_eq!(
+                actual_values,
+                Some(expected_values),
+                "{parameter} values should be exposed inline"
+            );
+            assert!(
+                items.get("$ref").is_none(),
+                "{parameter} items should not use a schema reference"
+            );
+        }
     }
 
     #[test]
@@ -415,7 +473,9 @@ mod tests {
         assert!(description.contains("Use case:"));
         assert!(description.contains("Input arguments:"));
         assert!(description.contains("Output arguments:"));
-        assert!(description.contains("score"));
-        assert!(description.contains("must never be shown to the user"));
+        assert!(description.contains("sources groups relevant passages by document"));
+        assert!(description.contains("copy their ieee_reference values verbatim"));
+        assert!(!description.contains("pdf_hash"));
+        assert!(!description.contains("score"));
     }
 }

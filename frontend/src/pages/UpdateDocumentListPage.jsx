@@ -3,6 +3,7 @@ import CustomTable from "../components/CustomTable";
 import react, { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { toast, ToastContainer } from "react-toastify";
+import { apiUrl } from "../utils/api";
 
 export default function UpdateDocumentList({}) {
   const tableHeaders = ["Title", "Published", "Status"];
@@ -32,8 +33,10 @@ export default function UpdateDocumentList({}) {
 
   async function loadDocuments() {
     try {
-      const normal = await fetchDocument("/api/documents");
-      const failed = await fetchDocument("/api/documents/requiring-fixing");
+      const normal = await fetchDocument(apiUrl("/documents"));
+      const failed = await fetchDocument(
+        apiUrl("/documents/requiring-fixing"),
+      );
 
       setDocuments([
         ...failed.map((doc) => ({ ...doc, requiresFixing: true })),
@@ -47,7 +50,7 @@ export default function UpdateDocumentList({}) {
   return (
     <div className="flex flex-col">
       <div className="flex justify-end my-3">
-        <NavLink to={"/upload"}>
+        <NavLink to={"/"}>
           <button className="ps-3! flex flex-row gap-2">
             <Upload className="size-5" />
             Upload a document

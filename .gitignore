@@ -5,6 +5,9 @@
 /frontend/.next/
 /.sources/
 .env
+.env.*
 !.env.example
 /.scannerwork
 /.data/
+/.agents
+AGENTS.md

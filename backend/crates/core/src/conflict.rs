@@ -4,6 +4,8 @@ use crate::pipeline::PipelineExecutionError;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum Conflict {
+    #[error("This PDF has already been uploaded")]
+    DuplicatePdf,
     #[error("Workflow identifier is already linked to another PDF")]
     WorkflowPdf,
     #[error("A record with this identity already exists")]
@@ -27,6 +29,7 @@ impl Conflict {
 
     pub fn from_message(message: &str) -> Option<Self> {
         [
+            Self::DuplicatePdf,
             Self::WorkflowPdf,
             Self::Record,
             Self::CanonicalIdentity,
