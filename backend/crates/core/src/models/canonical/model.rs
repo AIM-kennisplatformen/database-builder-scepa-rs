@@ -160,6 +160,16 @@ impl CanonicalModel {
         pdf_hash: &str,
         classification: &DocumentClassification,
     ) -> eros::Result<Self> {
+        Self::try_from_with_metadata(draft, pdf_hash, classification, None)
+    }
+
+    /// Canonicalises a draft with operator-authored upload metadata.
+    pub fn try_from_with_metadata(
+        draft: &TeiDocument,
+        pdf_hash: &str,
+        classification: &DocumentClassification,
+        description: Option<&str>,
+    ) -> eros::Result<Self> {
         if pdf_hash.len() != 64
             || !pdf_hash
                 .bytes()
@@ -176,6 +186,7 @@ impl CanonicalModel {
             Some(fallback_document_id),
             Some(pdf_hash.to_owned()),
             classification,
+            description,
         )
     }
 
@@ -184,8 +195,15 @@ impl CanonicalModel {
         fallback_document_id: Option<String>,
         pdf_hash: Option<String>,
         classification: &DocumentClassification,
+        description: Option<&str>,
     ) -> eros::Result<Self> {
-        let document = canonical_document(draft, fallback_document_id, pdf_hash, classification)?;
+        let document = canonical_document(
+            draft,
+            fallback_document_id,
+            pdf_hash,
+            classification,
+            description,
+        )?;
         if draft.bibliography.authors.is_empty() {
             eros::bail!("canonical document requires at least one contributor")
         }
@@ -371,7 +389,7 @@ impl TryFrom<&TeiDocument> for CanonicalModel {
 
     fn try_from(draft: &TeiDocument) -> Result<Self, Self::Error> {
         validate_required_fields(draft)?;
-        Self::from_draft(draft, None, None, &DocumentClassification::default())
+        Self::from_draft(draft, None, None, &DocumentClassification::default(), None)
     }
 }
 
@@ -380,11 +398,13 @@ fn canonical_document(
     fallback_document_id: Option<String>,
     pdf_hash: Option<String>,
     classification: &DocumentClassification,
+    description: Option<&str>,
 ) -> eros::Result<DocumentNode> {
     let Some(title) = non_empty(draft.bibliography.title.as_deref()) else {
         eros::bail!("canonical document requires a title")
     };
     let stable_document_id = non_empty(Some(&draft.id)).map(str::to_owned);
+    let description = non_empty(description).map(str::to_owned);
     let doi = identifier(&draft.bibliography.identifiers, |kind| {
         matches!(kind, IdentifierKind::Doi)
     });
@@ -393,6 +413,7 @@ fn canonical_document(
             document_id: stable_document_id.clone().unwrap_or_else(|| doi.to_owned()),
             pdf_hash,
             title: title.to_owned(),
+            description,
             classification: classification.clone(),
             doi: Some(doi.to_owned()),
         }));
@@ -407,6 +428,7 @@ fn canonical_document(
                 .unwrap_or_else(|| isbn.to_owned()),
             pdf_hash,
             title: title.to_owned(),
+            description,
             classification: classification.clone(),
             isbn: Some(isbn.to_owned()),
         }));
@@ -430,6 +452,7 @@ fn canonical_document(
         document_id,
         pdf_hash,
         title: title.to_owned(),
+        description,
         classification: classification.clone(),
     }))
 }

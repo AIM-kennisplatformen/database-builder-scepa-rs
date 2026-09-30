@@ -22,6 +22,8 @@ pub struct TypeDbExecuteRequest {
     pub document: TeiDocument,
     #[serde(default)]
     pub classification: DocumentClassification,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -31,9 +33,13 @@ pub struct TypeDbUpdateRequest {
     pub old_document: TeiDocument,
     #[serde(default)]
     pub old_classification: DocumentClassification,
+    #[serde(default)]
+    pub old_description: Option<String>,
     pub new_document: TeiDocument,
     #[serde(default)]
     pub new_classification: DocumentClassification,
+    #[serde(default)]
+    pub new_description: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -89,10 +95,11 @@ impl TypeDbRestateService {
         let request = request.into_inner();
         let canonical = match self
             .service
-            .pre_validate_with_classification(
+            .pre_validate_with_metadata(
                 &request.document,
                 &request.pdf_hash,
                 &request.classification,
+                request.description.as_deref(),
             )
             .await
         {
@@ -124,19 +131,21 @@ impl TypeDbRestateService {
         let request = request.into_inner();
         let old = self
             .service
-            .pre_validate_with_classification(
+            .pre_validate_with_metadata(
                 &request.old_document,
                 &request.pdf_hash,
                 &request.old_classification,
+                request.old_description.as_deref(),
             )
             .await
             .map_err(|_| TerminalError::new_with_code(422, "Existing document data is invalid"))?;
         let new = match self
             .service
-            .pre_validate_with_classification(
+            .pre_validate_with_metadata(
                 &request.new_document,
                 &request.pdf_hash,
                 &request.new_classification,
+                request.new_description.as_deref(),
             )
             .await
         {

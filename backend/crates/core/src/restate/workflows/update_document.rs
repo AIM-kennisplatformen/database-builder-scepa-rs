@@ -95,8 +95,10 @@ impl UpdateDocumentWorkflow {
                     pdf_hash: request.pdf_hash.clone(),
                     old_document: old_document.clone(),
                     old_classification: old_artifact.manual_data.classification.clone(),
+                    old_description: old_artifact.manual_data.description.clone(),
                     new_document: new_document.clone(),
                     new_classification: new_artifact.manual_data.classification.clone(),
+                    new_description: new_artifact.manual_data.description.clone(),
                 }))
                 .call()
                 .await?
@@ -122,6 +124,7 @@ impl UpdateDocumentWorkflow {
                     pdf_hash: request.pdf_hash.clone(),
                     document: new_document.clone(),
                     classification: new_artifact.manual_data.classification.clone(),
+                    description: new_artifact.manual_data.description.clone(),
                 }))
                 .call()
                 .await?
@@ -177,9 +180,16 @@ mod tests {
     fn ordinary_updates_do_not_require_a_review_case() {
         let request: UpdateDocumentWorkflowRequest = serde_json::from_value(serde_json::json!({
             "pdf_hash": "a".repeat(64),
-            "manual_data": { "bibliography": {} }
+            "manual_data": {
+                "description": "Why this document matters",
+                "bibliography": {}
+            }
         }))
         .unwrap();
         assert_eq!(request.review_case, None);
+        assert_eq!(
+            request.manual_data.description.as_deref(),
+            Some("Why this document matters")
+        );
     }
 }

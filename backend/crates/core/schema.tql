@@ -27,6 +27,7 @@ attribute issn sub id;
 attribute ror_id sub id;
 
 attribute title, value string;
+attribute description, value string;
 attribute pdf_hash, value string;
 
 attribute publication_date, value datetime;
@@ -43,6 +44,7 @@ entity document,
     owns document_id @key,
     owns pdf_hash @unique,
     owns title @card(1),
+    owns description @card(0..1),
     # classification marker attributes
     owns user_persona @card(0..3),
     owns strategic_overview @card(0..1),

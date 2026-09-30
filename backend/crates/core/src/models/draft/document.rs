@@ -527,6 +527,9 @@ fn validate_id(value: &str, label: &str, seen: &mut HashSet<String>) -> Result<(
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(default)]
 pub struct ManualDocument {
+    /// Optional operator-authored context managed through the update workflow.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub bibliography: ManualBibliography,
     pub classification: DocumentClassification,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -619,6 +622,7 @@ mod tests {
             draft.manual_data.classification,
             DocumentClassification::default()
         );
+        assert_eq!(draft.manual_data.description, None);
     }
 
     #[test]

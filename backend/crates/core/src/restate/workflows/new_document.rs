@@ -95,8 +95,10 @@ impl NewDocumentWorkflow {
                     pdf_hash: stored.pdf_hash.clone(),
                     old_document: old_document.clone(),
                     old_classification: old.manual_data.classification.clone(),
+                    old_description: old.manual_data.description.clone(),
                     new_document: effective_document.clone(),
                     new_classification: draft.manual_data.classification.clone(),
+                    new_description: draft.manual_data.description.clone(),
                 }))
                 .call()
                 .await?
@@ -118,6 +120,7 @@ impl NewDocumentWorkflow {
                     pdf_hash: stored.pdf_hash.clone(),
                     document: effective_document.clone(),
                     classification: draft.manual_data.classification.clone(),
+                    description: draft.manual_data.description.clone(),
                 }))
                 .call()
                 .await?

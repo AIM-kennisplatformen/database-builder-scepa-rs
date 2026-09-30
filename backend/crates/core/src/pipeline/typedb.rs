@@ -153,7 +153,8 @@ impl TypeDbStore {
                  $contribution_id label contribution_id; \
                  $affiliation_id label affiliation_id; \
                  $publication_event_id label publication_event_id; \
-                 $title label title;",
+                 $title label title; \
+                 $description label description;",
             )
             .await?;
         transaction.close().await?;
@@ -339,6 +340,17 @@ impl<S> TypeDbService<S> {
     ) -> eros::Result<CanonicalModel> {
         CanonicalModel::try_from_with_classification(draft, pdf_hash, classification)
     }
+
+    /// Canonicalises a document with its operator-authored description.
+    pub async fn pre_validate_with_metadata(
+        &self,
+        draft: &TeiDocument,
+        pdf_hash: &str,
+        classification: &DocumentClassification,
+        description: Option<&str>,
+    ) -> eros::Result<CanonicalModel> {
+        CanonicalModel::try_from_with_metadata(draft, pdf_hash, classification, description)
+    }
 }
 
 impl TypeDbService<TypeDbStore> {
@@ -421,6 +433,13 @@ fn document_insert_query(document: &Arc<EDocument>) -> eros::Result<(String, Giv
         declarations.push("$pdf_hash: string");
         attributes.push("has pdf_hash == $pdf_hash".to_owned());
         values.push(pdf_hash.to_owned().into());
+    }
+
+    if let Some(description) = document.description() {
+        variables.push("description".to_owned());
+        declarations.push("$description: string");
+        attributes.push("has description == $description".to_owned());
+        values.push(description.to_owned().into());
     }
 
     if let Some(doi) = document.doi() {
@@ -896,6 +915,23 @@ mod tests {
     }
 
     #[test]
+    fn document_insert_includes_an_operator_description() {
+        let canonical = CanonicalModel::try_from_with_metadata(
+            &draft(),
+            &"a".repeat(64),
+            &DocumentClassification::default(),
+            Some("  Useful context  "),
+        )
+        .unwrap();
+        let (query, rows) = document_insert_query(&canonical.document).unwrap();
+        let (_, values) = rows.into_parts();
+
+        assert!(query.contains("has description == $description"));
+        assert_eq!(canonical.document.description(), Some("Useful context"));
+        assert_eq!(values[0].len(), 5);
+    }
+
+    #[test]
     fn document_insert_uses_boolean_attributes_for_classification() {
         let classification = DocumentClassification {
             user_personas: [UserPersona::StrategicOverview, UserPersona::TargetGroups]
@@ -1117,6 +1153,8 @@ mod tests {
             .await
             .unwrap();
         let old_schema = include_str!("../../schema.tql")
+            .replace("attribute description, value string;\n", "")
+            .replace("    owns description @card(0..1),\n", "")
             .replace("attribute contribution_id sub id;\n", "")
             .replace("attribute affiliation_id sub id;\n", "")
             .replace("attribute publication_event_id sub id;\n", "")

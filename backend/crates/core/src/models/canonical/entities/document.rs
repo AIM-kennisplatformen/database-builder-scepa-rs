@@ -12,6 +12,7 @@ pub trait TDocument: Send + Sync {
     fn document_id(&self) -> &str;
     fn pdf_hash(&self) -> Option<&str>;
     fn title(&self) -> &str;
+    fn description(&self) -> Option<&str>;
     fn classification(&self) -> &DocumentClassification;
     fn entity_type(&self) -> &'static str;
     fn doi(&self) -> Option<&str> {
@@ -30,6 +31,8 @@ pub struct Document {
     pub document_id: String,
     pub pdf_hash: Option<String>,
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default)]
     pub classification: DocumentClassification,
 }
@@ -55,6 +58,10 @@ impl TDocument for Document {
         &self.title
     }
 
+    fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
     fn classification(&self) -> &DocumentClassification {
         &self.classification
     }
@@ -76,6 +83,8 @@ pub struct ResearchPaper {
     pub document_id: String,
     pub pdf_hash: Option<String>,
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default)]
     pub classification: DocumentClassification,
     pub doi: Option<String>,
@@ -100,6 +109,10 @@ impl TDocument for ResearchPaper {
 
     fn title(&self) -> &str {
         &self.title
+    }
+
+    fn description(&self) -> Option<&str> {
+        self.description.as_deref()
     }
 
     fn classification(&self) -> &DocumentClassification {
@@ -132,6 +145,8 @@ pub struct Book {
     pub document_id: String,
     pub pdf_hash: Option<String>,
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default)]
     pub classification: DocumentClassification,
     pub isbn: Option<String>,
@@ -156,6 +171,10 @@ impl TDocument for Book {
 
     fn title(&self) -> &str {
         &self.title
+    }
+
+    fn description(&self) -> Option<&str> {
+        self.description.as_deref()
     }
 
     fn classification(&self) -> &DocumentClassification {
@@ -186,6 +205,8 @@ pub struct Report {
     pub document_id: String,
     pub pdf_hash: Option<String>,
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default)]
     pub classification: DocumentClassification,
 }
@@ -209,6 +230,10 @@ impl TDocument for Report {
 
     fn title(&self) -> &str {
         &self.title
+    }
+
+    fn description(&self) -> Option<&str> {
+        self.description.as_deref()
     }
 
     fn classification(&self) -> &DocumentClassification {

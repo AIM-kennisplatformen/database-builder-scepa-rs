@@ -47,6 +47,10 @@ backfill is performed. A single oversized passage is kept whole.
 HTTP calls (default `4`). The CLI sends
 uploads to `SCEPA_API_URL` (default `http://localhost:3000`).
 
+The document update and repair forms accept an optional `description` alongside
+the existing manual corrections. It is stored as an optional, single-valued
+TypeDB document attribute and preserved by later update workflows.
+
 Draft responses contain deterministic UUIDv5 identifiers for documents,
 contributors, organizations, venues, passages, media, and graph
 relations. The identifiers are scoped to the PDF and remain unchanged when an
