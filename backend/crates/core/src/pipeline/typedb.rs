@@ -127,8 +127,10 @@ impl TypeDbStore {
                 "match \
                  $document label document; \
                  $classification label classification; \
-                 $research_paper label research_paper; \
-                 $book label book; \
+                 $grey_document isa! grey_literature; \
+                 $scientific_document isa! scientific_literature; \
+                 $project_document isa! project_report; \
+                 $identified_document isa document, has doi $doi, has isbn $isbn; \
                  $person label person; \
                  $organization label organization; \
                  $publisher label publisher; \
@@ -138,13 +140,9 @@ impl TypeDbStore {
                  $affiliation label affiliation; \
                  $publication label publication; \
                  $user_persona label user_persona; \
-                 $kind_of_literature label kind_of_literature; \
                  $strategic_overview label strategic_overview; \
                  $best_practices label best_practices; \
                  $target_groups label target_groups; \
-                 $grey_literature label grey_literature; \
-                 $scientific_literature label scientific_literature; \
-                 $project_report label project_report; \
                  $document_id label document_id; \
                  $pdf_hash label pdf_hash; \
                  $person_id label person_id; \
@@ -461,10 +459,6 @@ fn document_insert_query(document: &Arc<EDocument>) -> eros::Result<(String, Giv
             .iter()
             .map(|persona| format!("has {} true", persona.as_str())),
     );
-    if let Some(kind) = document.classification().literature_kind {
-        attributes.push(format!("has {} true", kind.as_str()));
-    }
-
     let query = format!(
         "given {}; insert $document isa {}, {};",
         declarations.join(", "),
@@ -903,12 +897,12 @@ mod tests {
     }
 
     #[test]
-    fn research_paper_insert_uses_typed_parameters() {
+    fn document_insert_uses_typed_identifier_parameters() {
         let canonical = CanonicalModel::try_from(&draft()).unwrap();
         let (query, rows) = document_insert_query(&canonical.document).unwrap();
         let (_, values) = rows.into_parts();
 
-        assert!(query.contains("isa research_paper"));
+        assert!(query.contains("isa document"));
         assert!(query.contains("has doi == $doi"));
         assert_eq!(values.len(), 1);
         assert_eq!(values[0].len(), 3);
@@ -932,7 +926,7 @@ mod tests {
     }
 
     #[test]
-    fn document_insert_uses_boolean_attributes_for_classification() {
+    fn document_insert_uses_subtype_and_boolean_persona_attributes() {
         let classification = DocumentClassification {
             user_personas: [UserPersona::StrategicOverview, UserPersona::TargetGroups]
                 .into_iter()
@@ -951,7 +945,7 @@ mod tests {
 
         assert!(query.contains("has strategic_overview true"));
         assert!(query.contains("has target_groups true"));
-        assert!(query.contains("has project_report true"));
+        assert!(query.contains("isa project_report"));
         assert_eq!(values[0].len(), 4);
     }
 
@@ -1118,63 +1112,6 @@ mod tests {
         let result = async {
             service.execute(&old).await?;
             service.execute_update(&old, &new).await.map(|_| ())
-        }
-        .await;
-        service
-            .store
-            .driver
-            .databases()
-            .get(&database)
-            .await
-            .unwrap()
-            .delete()
-            .await
-            .unwrap();
-
-        result.unwrap();
-    }
-
-    #[tokio::test]
-    #[ignore = "requires a local TypeDB service and creates a temporary database"]
-    async fn existing_unclassified_schema_is_migrated() {
-        let (address, _, username, password) = live_typedb_settings();
-        let database = format!("scepa_schema_migration_test_{}", std::process::id());
-        let driver = TypeDBDriver::new(
-            Addresses::try_from_address_str(&address).unwrap(),
-            Credentials::new(&username, &password),
-            DriverOptions::new(DriverTlsConfig::disabled()),
-        )
-        .await
-        .unwrap();
-        assert!(!driver.databases().contains(&database).await.unwrap());
-        driver.databases().create(&database).await.unwrap();
-        let transaction = driver
-            .transaction(&database, TransactionType::Schema)
-            .await
-            .unwrap();
-        let old_schema = include_str!("../../schema.tql")
-            .replace("attribute description, value string;\n", "")
-            .replace("    owns description @card(0..1),\n", "")
-            .replace("attribute contribution_id sub id;\n", "")
-            .replace("attribute affiliation_id sub id;\n", "")
-            .replace("attribute publication_event_id sub id;\n", "")
-            .replace("    owns contribution_id @unique,\n", "")
-            .replace("    owns affiliation_id @unique,\n", "")
-            .replace("    owns publication_event_id @unique,\n", "")
-            .replace(
-                "attribute classification @abstract, value boolean @values(true);\n\nattribute user_persona @abstract, sub classification;\nattribute strategic_overview sub user_persona;\nattribute best_practices sub user_persona;\nattribute target_groups sub user_persona;\n\nattribute kind_of_literature @abstract, sub classification;\nattribute grey_literature sub kind_of_literature;\nattribute scientific_literature sub kind_of_literature;\nattribute project_report sub kind_of_literature;\n\n",
-                "",
-            )
-            .replace(
-                "    # classification marker attributes\n    owns user_persona @card(0..3),\n    owns strategic_overview @card(0..1),\n    owns best_practices @card(0..1),\n    owns target_groups @card(0..1),\n    owns kind_of_literature @card(0..1),\n    owns grey_literature @card(0..1),\n    owns scientific_literature @card(0..1),\n    owns project_report @card(0..1),\n",
-                "",
-            );
-        transaction.query(&old_schema).await.unwrap();
-        transaction.commit().await.unwrap();
-        let service = TypeDbService::from_driver(driver, &database);
-        let result = async {
-            service.ensure_schema().await?;
-            service.execute(&expanded_canonical()).await
         }
         .await;
         service

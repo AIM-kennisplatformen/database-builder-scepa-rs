@@ -65,8 +65,23 @@ accepts unique values from `strategic_overview`, `best_practices`, and
 `target_groups`; `literature_kind` accepts `grey_literature`,
 `scientific_literature`, `project_report`, or `null`. Uploads do not infer these
 values and remain valid while unclassified. TypeDB stores selected values as
-boolean marker attributes owned by the document under the abstract
-`classification` hierarchy.
+the mutually exclusive `grey_literature`, `scientific_literature`, and
+`project_report` subtypes of `document`. Unclassified records use the exact
+base `document` type. DOI and ISBN attributes are owned by `document` and are
+available on every subtype.
+
+To migrate an existing TypeDB database from the legacy `research_paper`,
+`report`, and `book` hierarchy, stop the API and MCP processes and run:
+
+```bash
+./backend/scripts/migrate_typedb_document_hierarchy/run.sh
+```
+
+The script uses `TYPEDB_ADDRESS`, `TYPEDB_DATABASE`, `TYPEDB_USERNAME`, and
+`TYPEDB_PASSWORD`, with matching command-line options available as overrides.
+It preserves document attributes and rewires contribution, affiliation, and
+publication-event relations. The migration is a standalone disposable Cargo
+project and is not linked into the application crates.
 
 ## Database import and export
 

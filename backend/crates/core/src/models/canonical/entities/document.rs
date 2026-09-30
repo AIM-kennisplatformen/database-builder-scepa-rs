@@ -1,11 +1,6 @@
 use enum_dispatch::enum_dispatch;
-use nonempty_collections::NEVec;
-use std::sync::Arc;
 
-use crate::models::canonical::relations::{
-    affiliation::EAffiliation, contribution::EContribution, publication_event::EPublicationEvent,
-};
-use crate::models::draft::DocumentClassification;
+use crate::models::draft::{DocumentClassification, LiteratureKind};
 
 #[enum_dispatch]
 pub trait TDocument: Send + Sync {
@@ -15,243 +10,92 @@ pub trait TDocument: Send + Sync {
     fn description(&self) -> Option<&str>;
     fn classification(&self) -> &DocumentClassification;
     fn entity_type(&self) -> &'static str;
-    fn doi(&self) -> Option<&str> {
-        None
-    }
-    fn isbn(&self) -> Option<&str> {
-        None
-    }
-}
-
-#[derive(
-    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
-)]
-#[builder(on(String, into))]
-pub struct Document {
-    pub document_id: String,
-    pub pdf_hash: Option<String>,
-    pub title: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub classification: DocumentClassification,
-}
-
-#[derive(bon::Builder)]
-pub struct ADocument {
-    pub document: Document,
-    pub contributions: NEVec<Arc<EContribution>>,
-    pub publication_events: Vec<Arc<EPublicationEvent>>,
-    pub affiliations: Vec<Arc<EAffiliation>>,
-}
-
-impl TDocument for Document {
-    fn document_id(&self) -> &str {
-        &self.document_id
-    }
-
-    fn pdf_hash(&self) -> Option<&str> {
-        self.pdf_hash.as_deref()
-    }
-
-    fn title(&self) -> &str {
-        &self.title
-    }
-
-    fn description(&self) -> Option<&str> {
-        self.description.as_deref()
-    }
-
-    fn classification(&self) -> &DocumentClassification {
-        &self.classification
-    }
-
-    fn entity_type(&self) -> &'static str {
-        "document"
-    }
-}
-
-pub trait TResearchPaper: TDocument {
     fn doi(&self) -> Option<&str>;
-}
-
-#[derive(
-    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
-)]
-#[builder(on(String, into))]
-pub struct ResearchPaper {
-    pub document_id: String,
-    pub pdf_hash: Option<String>,
-    pub title: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub classification: DocumentClassification,
-    pub doi: Option<String>,
-}
-
-#[derive(bon::Builder)]
-pub struct AResearchPaper {
-    pub research_paper: ResearchPaper,
-    pub contributions: NEVec<Arc<EContribution>>,
-    pub publication_events: Vec<Arc<EPublicationEvent>>,
-    pub affiliations: Vec<Arc<EAffiliation>>,
-}
-
-impl TDocument for ResearchPaper {
-    fn document_id(&self) -> &str {
-        &self.document_id
-    }
-
-    fn pdf_hash(&self) -> Option<&str> {
-        self.pdf_hash.as_deref()
-    }
-
-    fn title(&self) -> &str {
-        &self.title
-    }
-
-    fn description(&self) -> Option<&str> {
-        self.description.as_deref()
-    }
-
-    fn classification(&self) -> &DocumentClassification {
-        &self.classification
-    }
-
-    fn entity_type(&self) -> &'static str {
-        "research_paper"
-    }
-
-    fn doi(&self) -> Option<&str> {
-        self.doi.as_deref()
-    }
-}
-impl TResearchPaper for ResearchPaper {
-    fn doi(&self) -> Option<&str> {
-        self.doi.as_deref()
-    }
-}
-
-pub trait TBook: TDocument {
     fn isbn(&self) -> Option<&str>;
 }
 
-#[derive(
-    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
-)]
-#[builder(on(String, into))]
-pub struct Book {
-    pub document_id: String,
-    pub pdf_hash: Option<String>,
-    pub title: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub classification: DocumentClassification,
-    pub isbn: Option<String>,
-}
-
-#[derive(bon::Builder)]
-pub struct ABook {
-    pub book: Book,
-    pub contributions: NEVec<Arc<EContribution>>,
-    pub publication_events: Vec<Arc<EPublicationEvent>>,
-    pub affiliations: Vec<Arc<EAffiliation>>,
-}
-
-impl TDocument for Book {
-    fn document_id(&self) -> &str {
-        &self.document_id
-    }
-
-    fn pdf_hash(&self) -> Option<&str> {
-        self.pdf_hash.as_deref()
-    }
-
-    fn title(&self) -> &str {
-        &self.title
-    }
-
-    fn description(&self) -> Option<&str> {
-        self.description.as_deref()
-    }
-
-    fn classification(&self) -> &DocumentClassification {
-        &self.classification
-    }
-
-    fn entity_type(&self) -> &'static str {
-        "book"
-    }
-
-    fn isbn(&self) -> Option<&str> {
-        self.isbn.as_deref()
-    }
-}
-impl TBook for Book {
-    fn isbn(&self) -> Option<&str> {
-        self.isbn.as_deref()
+fn entity_type(classification: &DocumentClassification) -> &'static str {
+    match classification.literature_kind {
+        None => "document",
+        Some(LiteratureKind::GreyLiterature) => "grey_literature",
+        Some(LiteratureKind::ScientificLiterature) => "scientific_literature",
+        Some(LiteratureKind::ProjectReport) => "project_report",
     }
 }
 
-pub trait TReport: TDocument {}
+macro_rules! document_type {
+    ($name:ident) => {
+        #[derive(
+            Clone,
+            Debug,
+            PartialEq,
+            serde::Serialize,
+            serde::Deserialize,
+            bon::Builder,
+            utoipa::ToSchema,
+        )]
+        #[builder(on(String, into))]
+        pub struct $name {
+            pub document_id: String,
+            pub pdf_hash: Option<String>,
+            pub title: String,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            pub description: Option<String>,
+            #[serde(default)]
+            pub classification: DocumentClassification,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            pub doi: Option<String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            pub isbn: Option<String>,
+        }
 
-#[derive(
-    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, bon::Builder, utoipa::ToSchema,
-)]
-#[builder(on(String, into))]
-pub struct Report {
-    pub document_id: String,
-    pub pdf_hash: Option<String>,
-    pub title: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub classification: DocumentClassification,
+        impl TDocument for $name {
+            fn document_id(&self) -> &str {
+                &self.document_id
+            }
+
+            fn pdf_hash(&self) -> Option<&str> {
+                self.pdf_hash.as_deref()
+            }
+
+            fn title(&self) -> &str {
+                &self.title
+            }
+
+            fn description(&self) -> Option<&str> {
+                self.description.as_deref()
+            }
+
+            fn classification(&self) -> &DocumentClassification {
+                &self.classification
+            }
+
+            fn entity_type(&self) -> &'static str {
+                entity_type(&self.classification)
+            }
+
+            fn doi(&self) -> Option<&str> {
+                self.doi.as_deref()
+            }
+
+            fn isbn(&self) -> Option<&str> {
+                self.isbn.as_deref()
+            }
+        }
+    };
 }
 
-#[derive(bon::Builder)]
-pub struct AReport {
-    pub report: Report,
-    pub contributions: NEVec<Arc<EContribution>>,
-    pub publication_events: Vec<Arc<EPublicationEvent>>,
-    pub affiliations: Vec<Arc<EAffiliation>>,
-}
-
-impl TDocument for Report {
-    fn document_id(&self) -> &str {
-        &self.document_id
-    }
-
-    fn pdf_hash(&self) -> Option<&str> {
-        self.pdf_hash.as_deref()
-    }
-
-    fn title(&self) -> &str {
-        &self.title
-    }
-
-    fn description(&self) -> Option<&str> {
-        self.description.as_deref()
-    }
-
-    fn classification(&self) -> &DocumentClassification {
-        &self.classification
-    }
-
-    fn entity_type(&self) -> &'static str {
-        "report"
-    }
-}
-impl TReport for Report {}
+document_type!(Document);
+document_type!(GreyLiterature);
+document_type!(ScientificLiterature);
+document_type!(ProjectReport);
 
 #[enum_dispatch(TDocument)]
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EDocument {
     Document,
-    ResearchPaper,
-    Book,
-    Report,
+    GreyLiterature,
+    ScientificLiterature,
+    ProjectReport,
 }

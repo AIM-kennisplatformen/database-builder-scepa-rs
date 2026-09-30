@@ -273,7 +273,7 @@ in the separate `scepa-cli` crate.
 
 The self-contained project under `mcp/` exposes authenticated Streamable HTTP at
 `/mcp`. `search_literature` first obtains eligible PDF hashes from TypeDB using
-publication-date, document-type, classification, and organization filters, similarity-searches
+publication-date, document-type, user-persona, and organization filters, similarity-searches
 `4 × top_k` source passages in Qdrant, resolves their linked combined passages,
 and reranks them locally. Search responses always include bibliographic metadata
 as deterministic IEEE references with passages grouped by document. PDF hashes

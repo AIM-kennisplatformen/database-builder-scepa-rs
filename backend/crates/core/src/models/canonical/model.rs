@@ -8,7 +8,9 @@ use sha2::{Digest, Sha256};
 
 use super::{
     entities::{
-        document::{Book, Document, EDocument, ResearchPaper, TDocument},
+        document::{
+            Document, EDocument, GreyLiterature, ProjectReport, ScientificLiterature, TDocument,
+        },
         organization::{EOrganization, Organization, Publisher},
         person::{EPerson, Person},
         publication_venue::{EPublicationVenue, Journal},
@@ -20,7 +22,8 @@ use super::{
     },
 };
 use crate::models::draft::{
-    ContributorRole, DocumentClassification, Identifier, IdentifierKind, TeiDocument,
+    ContributorRole, DocumentClassification, Identifier, IdentifierKind, LiteratureKind,
+    TeiDocument,
 };
 
 /// A canonical object graph whose nodes and relations map directly to the TypeDB schema.
@@ -407,32 +410,12 @@ fn canonical_document(
     let description = non_empty(description).map(str::to_owned);
     let doi = identifier(&draft.bibliography.identifiers, |kind| {
         matches!(kind, IdentifierKind::Doi)
-    });
-    if let Some(doi) = doi {
-        return Ok(document_node(ResearchPaper {
-            document_id: stable_document_id.clone().unwrap_or_else(|| doi.to_owned()),
-            pdf_hash,
-            title: title.to_owned(),
-            description,
-            classification: classification.clone(),
-            doi: Some(doi.to_owned()),
-        }));
-    }
+    })
+    .map(str::to_owned);
     let isbn = identifier(&draft.bibliography.identifiers, |kind| {
         matches!(kind, IdentifierKind::Isbn)
-    });
-    if let Some(isbn) = isbn {
-        return Ok(document_node(Book {
-            document_id: stable_document_id
-                .clone()
-                .unwrap_or_else(|| isbn.to_owned()),
-            pdf_hash,
-            title: title.to_owned(),
-            description,
-            classification: classification.clone(),
-            isbn: Some(isbn.to_owned()),
-        }));
-    }
+    })
+    .map(str::to_owned);
     let Some(document_id) = stable_document_id.or_else(|| {
         draft
             .bibliography
@@ -448,13 +431,26 @@ fn canonical_document(
     }) else {
         eros::bail!("canonical document requires a stable document identifier")
     };
-    Ok(document_node(Document {
-        document_id,
-        pdf_hash,
-        title: title.to_owned(),
-        description,
-        classification: classification.clone(),
-    }))
+    macro_rules! canonical_document {
+        ($document_type:ident) => {
+            document_node($document_type {
+                document_id,
+                pdf_hash,
+                title: title.to_owned(),
+                description,
+                classification: classification.clone(),
+                doi,
+                isbn,
+            })
+        };
+    }
+
+    Ok(match classification.literature_kind {
+        None => canonical_document!(Document),
+        Some(LiteratureKind::GreyLiterature) => canonical_document!(GreyLiterature),
+        Some(LiteratureKind::ScientificLiterature) => canonical_document!(ScientificLiterature),
+        Some(LiteratureKind::ProjectReport) => canonical_document!(ProjectReport),
+    })
 }
 
 fn identifier(
@@ -556,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn doi_draft_becomes_a_canonical_research_paper() {
+    fn doi_is_stored_on_a_canonical_document() {
         let canonical = CanonicalModel::try_from(&draft(
             Some(" A paper "),
             vec![id(IdentifierKind::Doi, "10.1234/example")],
@@ -564,7 +560,8 @@ mod tests {
         .unwrap();
         assert_eq!(canonical.document.document_id(), "10.1234/example");
         assert_eq!(canonical.document.title(), "A paper");
-        assert_eq!(canonical.document.entity_type(), "research_paper");
+        assert_eq!(canonical.document.entity_type(), "document");
+        assert_eq!(canonical.document.doi(), Some("10.1234/example"));
     }
 
     #[test]
@@ -661,7 +658,7 @@ mod tests {
         let canonical = CanonicalModel::try_from(&draft).unwrap();
 
         let json = serde_json::to_value(&canonical).unwrap();
-        assert_eq!(json["document"]["type"], "research_paper");
+        assert_eq!(json["document"]["type"], "document");
         assert_eq!(json["persons"][0]["type"], "person");
         assert_eq!(json["organizations"][0]["type"], "organization");
         assert_eq!(json["publication_venues"][0]["type"], "journal");

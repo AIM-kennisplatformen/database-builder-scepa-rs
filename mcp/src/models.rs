@@ -12,14 +12,14 @@ pub struct PublicationDateFilter {
 #[serde(rename_all = "snake_case")]
 #[schemars(inline)]
 pub enum DocumentTypeFilter {
-    /// The exact base document type, excluding its research_paper, report, and book subtypes.
+    /// The exact base document type, containing only unclassified documents.
     Document,
-    /// A scholarly research paper.
-    ResearchPaper,
-    /// A report.
-    Report,
-    /// A book.
-    Book,
+    /// Grey literature.
+    GreyLiterature,
+    /// Scientific literature.
+    ScientificLiterature,
+    /// A project report.
+    ProjectReport,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -41,32 +41,13 @@ impl UserPersonaFilter {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-#[schemars(inline)]
-pub enum LiteratureKindFilter {
-    GreyLiterature,
-    ScientificLiterature,
-    ProjectReport,
-}
-
-impl LiteratureKindFilter {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::GreyLiterature => "grey_literature",
-            Self::ScientificLiterature => "scientific_literature",
-            Self::ProjectReport => "project_report",
-        }
-    }
-}
-
 impl DocumentTypeFilter {
     pub fn label(self) -> &'static str {
         match self {
             Self::Document => "document",
-            Self::ResearchPaper => "research_paper",
-            Self::Report => "report",
-            Self::Book => "book",
+            Self::GreyLiterature => "grey_literature",
+            Self::ScientificLiterature => "scientific_literature",
+            Self::ProjectReport => "project_report",
         }
     }
 }
@@ -133,8 +114,6 @@ pub struct LiteratureFilters {
     pub document_types: Vec<DocumentTypeFilter>,
     #[serde(default)]
     pub user_personas: Vec<UserPersonaFilter>,
-    #[serde(default)]
-    pub literature_kinds: Vec<LiteratureKindFilter>,
     pub organization: Option<OrganizationFilter>,
 }
 
@@ -311,7 +290,7 @@ mod tests {
     fn ieee_reference_uses_only_available_document_metadata() {
         let mut document = DocumentMetadata {
             document_id: "10.1000/example".into(),
-            document_type: "research_paper".into(),
+            document_type: "scientific_literature".into(),
             title: "Grounded Evidence".into(),
             description: Some("Why this source matters".into()),
             ieee_reference: String::new(),

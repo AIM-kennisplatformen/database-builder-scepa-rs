@@ -479,14 +479,6 @@ pub fn filter_query(filters: &LiteratureFilters) -> String {
                 .map(|persona| format!("$document has {} true", persona.label())),
         ));
     }
-    if !filters.literature_kinds.is_empty() {
-        patterns.push(or_patterns(
-            filters
-                .literature_kinds
-                .iter()
-                .map(|kind| format!("$document has {} true", kind.label())),
-        ));
-    }
     if let Some(range) = &filters.publication_date {
         patterns.push(
             "$publication isa publication, links (work: $document), has publication_date $date"
@@ -603,8 +595,8 @@ mod tests {
 
     use super::*;
     use crate::models::{
-        DocumentTypeFilter, LiteratureKindFilter, OrganizationFilter, OrganizationTypeFilter,
-        PublicationDateFilter, UserPersonaFilter,
+        DocumentTypeFilter, OrganizationFilter, OrganizationTypeFilter, PublicationDateFilter,
+        UserPersonaFilter,
     };
 
     #[test]
@@ -614,12 +606,11 @@ mod tests {
                 from: Some(NaiveDate::from_ymd_opt(2020, 1, 1).unwrap()),
                 to: Some(NaiveDate::from_ymd_opt(2024, 12, 31).unwrap()),
             }),
-            document_types: vec![DocumentTypeFilter::ResearchPaper],
+            document_types: vec![DocumentTypeFilter::ProjectReport],
             user_personas: vec![
                 UserPersonaFilter::StrategicOverview,
                 UserPersonaFilter::TargetGroups,
             ],
-            literature_kinds: vec![LiteratureKindFilter::ProjectReport],
             organization: Some(OrganizationFilter {
                 names: vec!["ACME\"; delete $x".into()],
                 roles: vec![OrganizationRoleFilter::Affiliation],
@@ -627,10 +618,9 @@ mod tests {
             }),
         };
         let query = filter_query(&filters);
-        assert!(query.contains("isa! research_paper"));
+        assert!(query.contains("isa! project_report"));
         assert!(query.contains("has strategic_overview true"));
         assert!(query.contains("has target_groups true"));
-        assert!(query.contains("has project_report true"));
         assert!(query.contains("isa institution"));
         assert!(query.contains("2025-01-01T00:00:00"));
         assert!(query.contains(r#"contains "ACME\"; delete $x""#));
@@ -655,9 +645,9 @@ mod tests {
                 UserPersonaFilter::StrategicOverview,
                 UserPersonaFilter::BestPractices,
             ],
-            literature_kinds: vec![
-                LiteratureKindFilter::GreyLiterature,
-                LiteratureKindFilter::ScientificLiterature,
+            document_types: vec![
+                DocumentTypeFilter::GreyLiterature,
+                DocumentTypeFilter::ScientificLiterature,
             ],
             ..LiteratureFilters::default()
         };
@@ -666,7 +656,7 @@ mod tests {
 
         assert!(query.contains("has strategic_overview true"));
         assert!(query.contains("or { $document has best_practices true"));
-        assert!(query.contains("has grey_literature true"));
-        assert!(query.contains("or { $document has scientific_literature true"));
+        assert!(query.contains("isa! grey_literature"));
+        assert!(query.contains("or { $document isa! scientific_literature"));
     }
 }
