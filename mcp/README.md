@@ -14,7 +14,8 @@ The server exposes:
   Persona and literature-kind values use OR within their category; filter
   categories combine with AND, and empty arrays impose no restriction. Every search
   groups relevant passages by document and includes a deterministic
-  `ieee_reference` for each represented document. PDF hashes and reranker scores
+  `ieee_reference` and the optional operator description for each represented
+  document. PDF hashes and reranker scores
   remain internal to retrieval and are not serialized in tool responses. The
   optional `top_k` parameter controls the number of retrieved passages, defaults
   to 30, and accepts values from 1 through 50.

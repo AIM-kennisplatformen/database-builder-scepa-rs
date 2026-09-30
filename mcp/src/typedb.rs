@@ -91,6 +91,7 @@ impl MetadataStore {
                     document_id: row_string(&row, "document_id")?,
                     document_type: row_label(&row, "document_type")?,
                     title: row_string(&row, "title")?,
+                    description: None,
                     ieee_reference: String::new(),
                     doi: None,
                     isbn: Vec::new(),
@@ -102,6 +103,7 @@ impl MetadataStore {
                 },
             );
         }
+        self.add_descriptions(pdf_hashes, &mut documents).await?;
         self.add_identifiers(pdf_hashes, &mut documents).await?;
         let parties = self.parties(pdf_hashes).await?;
         for ((hash, _), party) in &parties {
@@ -183,6 +185,23 @@ impl MetadataStore {
                         document.isbn.push(value);
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    async fn add_descriptions(
+        &self,
+        hashes: &[String],
+        documents: &mut BTreeMap<String, DocumentMetadata>,
+    ) -> Result<(), SearchError> {
+        let query = "given $requested_hash: string; match $document isa document, \
+            has pdf_hash == $requested_hash, has description $description; \
+            select $requested_hash, $description;";
+        for row in self.metadata_rows(query, hashes).await? {
+            let hash = row_string(&row, "requested_hash")?;
+            if let Some(document) = documents.get_mut(&hash) {
+                document.description = Some(row_string(&row, "description")?);
             }
         }
         Ok(())

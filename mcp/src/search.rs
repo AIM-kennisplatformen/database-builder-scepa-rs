@@ -157,6 +157,7 @@ fn group_sources(
         source_indexes.insert(candidate.pdf_hash, sources.len());
         sources.push(LiteratureSource {
             ieee_reference: metadata.ieee_reference.clone(),
+            description: metadata.description.clone(),
             passages: vec![candidate.text],
         });
     }
@@ -198,6 +199,7 @@ mod tests {
             document_id: "document".into(),
             document_type: "report".into(),
             title: "Title".into(),
+            description: None,
             ieee_reference: reference.into(),
             doi: None,
             isbn: Vec::new(),
