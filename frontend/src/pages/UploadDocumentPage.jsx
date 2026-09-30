@@ -60,6 +60,13 @@ export default function UploadDocumentPage() {
         });
         return;
       }
+      if (response.status === 409 && data?.pdf_hash) {
+        setFile(null);
+        navigate(`/update/${data.pdf_hash}`, {
+          state: { duplicateUpload: true },
+        });
+        return;
+      }
       if (!response.ok) {
         throw Error(data?.error ?? "Failed to upload document");
       }

@@ -15,7 +15,7 @@ use scepa::{
         canonical::{CanonicalMissingField, CanonicalModel, canonical_missing_fields},
         draft::{DraftDocument, ManualDocument},
     },
-    pipeline::garage::GaragePipelineService,
+    pipeline::garage::{GaragePipelineService, sha256_hex},
     postgres::{
         PostgresReviewStore, PublishedDocument, PublishedDocumentSummary, ReviewCaseDocumentSummary,
     },
@@ -345,7 +345,9 @@ async fn download_pdf(
     tag = "documents"
 )]
 async fn upload_pdf(State(state): State<AppState>, pdf: Bytes) -> Result<Response, ApiError> {
-    let upload = match state.uploads.run(pdf.to_vec()).await {
+    let pdf = pdf.to_vec();
+    let pdf_hash = sha256_hex(&pdf);
+    let upload = match state.uploads.run(pdf).await {
         Ok(upload) => upload,
         Err(failure) => {
             if let Some(validation) =
@@ -356,9 +358,13 @@ async fn upload_pdf(State(state): State<AppState>, pdf: Bytes) -> Result<Respons
                 response.extensions_mut().insert(StructuredApiError);
                 return Ok(response);
             }
-            return Err(
-                document_upload_error(&state, &failure.workflow_id, failure.source, None).await,
-            );
+            return Err(document_upload_error(
+                &state,
+                &failure.workflow_id,
+                failure.source,
+                Some(pdf_hash),
+            )
+            .await);
         }
     };
 
@@ -896,12 +902,13 @@ async fn document_upload_error(
                 .get_ref()
                 .and_then(|error| error.downcast_ref::<scepa::conflict::Conflict>())
             {
-                let mut error = api_error(
-                    StatusCode::CONFLICT,
-                    conflict.to_string(),
-                    "Use a new workflow identifier or refresh the existing submission",
-                );
-                error.1.workflow_id = Some(workflow_id.to_owned());
+                let action = if *conflict == scepa::conflict::Conflict::DuplicatePdf {
+                    "Open the existing document to review or update it"
+                } else {
+                    "Use a new workflow identifier or refresh the existing submission"
+                };
+                let mut error = api_error(StatusCode::CONFLICT, conflict.to_string(), action);
+                add_error_context(&mut error, workflow_id, pdf_hash, None);
                 return error;
             }
             tracing::error!(error = %source, %workflow_id, "PDF storage pipeline failed");
@@ -1120,6 +1127,7 @@ mod tests {
     #[tokio::test]
     async fn conflicts_reach_http_as_safe_json() {
         for conflict in [
+            scepa::conflict::Conflict::DuplicatePdf,
             scepa::conflict::Conflict::WorkflowPdf,
             scepa::conflict::Conflict::Record,
             scepa::conflict::Conflict::CanonicalIdentity,

@@ -460,6 +460,7 @@ mod tests {
     #[test]
     fn conflict_responses_preserve_only_safe_messages() {
         for conflict in [
+            crate::conflict::Conflict::DuplicatePdf,
             crate::conflict::Conflict::WorkflowPdf,
             crate::conflict::Conflict::Record,
             crate::conflict::Conflict::CanonicalIdentity,

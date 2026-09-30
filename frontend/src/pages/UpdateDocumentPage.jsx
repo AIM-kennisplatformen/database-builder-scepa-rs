@@ -2,7 +2,7 @@ import { ChevronDown, Loader2 } from "lucide-react";
 import AuthorDisplay from "../components/AuthorDisplay";
 import PdfViewer from "../components/PdfViewer";
 import { useState, useEffect, useRef } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import { TEXT_REGEX, isValidField } from "../utils/validation";
 import { Plus } from "lucide-react";
 import { AUTHOR_FIELDS } from "../components/AuthorDisplay";
@@ -271,6 +271,7 @@ function sanitizeContributor(author) {
 
 export default function UpdateDocumentPage({}) {
   const { pdf_hash } = useParams();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const requiresFixing = searchParams.get("requiresFixing") === "true";
   const [documentData, setDocumentData] = useState(null);
@@ -296,6 +297,14 @@ export default function UpdateDocumentPage({}) {
     literature_kind: null,
   });
   const pendingSaveRef = useRef(null);
+
+  useEffect(() => {
+    if (location.state?.duplicateUpload) {
+      toast.info("This PDF has already been uploaded. Opening the existing document.", {
+        toastId: "duplicate-pdf-upload",
+      });
+    }
+  }, [location.state]);
 
   const bibliography =
     documentData?.artifact?.grobid_extraction_data?.bibliography;
