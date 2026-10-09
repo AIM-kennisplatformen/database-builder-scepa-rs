@@ -53,6 +53,42 @@
   color: var(--primary-foreground);
 }
 
+@utility scrollbar-custom {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+
+  &::-webkit-scrollbar {
+    width: 10px;
+  }
+  &::-webkit-scrollbar-track {
+    background: var(
+      --scrollbar-track,
+      color-mix(in srgb, var(--primary) 10%, transparent)
+    );
+    border-radius: 9999px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb, var(--primary));
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover, var(--primary-dark));
+  }
+  /* thinner transparent border = wider thumb, without changing the scrollbar width (no layout shift) */
+  &::-webkit-scrollbar-thumb:active {
+    border-width: 2px;
+  }
+
+  /* Firefox only */
+  @supports not selector(::-webkit-scrollbar) {
+    scrollbar-width: auto;
+    scrollbar-color: var(--scrollbar-thumb, var(--primary-dark))
+      var(--scrollbar-track, color-mix(in srgb, var(--primary) 10%, white));
+  }
+}
+
 button {
   border-radius: 8px;
   border: 1px solid transparent;
