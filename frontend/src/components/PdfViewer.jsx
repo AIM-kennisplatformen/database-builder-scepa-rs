@@ -149,7 +149,7 @@ export default function PdfViewer({ file }) {
           </Document>
         </div>
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center ">
+        <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center z-100">
           <div className="pointer-events-auto flex items-center rounded-2xl border flex-row gap-4 text-primary border-border bg-white/90 px-3 py-1.5 text-sm shadow-md backdrop-blur">
             <span className="text-muted-foreground">
               Page {currentPage} of {numPages ?? "?"}
