@@ -11,7 +11,7 @@ export default function CustomSuccessToast() {
         <p className="text-sm">Your changes have been saved</p>
         <button
           className="shrink-0 mt-2! p-1.5!"
-          onClick={() => navigate("/upload")}
+          onClick={() => navigate("/")}
         >
           Upload more
         </button>
