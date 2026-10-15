@@ -45,7 +45,7 @@ export default function UpdateDocumentList({}) {
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col w-full max-w-7xl mx-auto justify-center">
       <div className="flex justify-end my-3">
         <NavLink to={"/upload"}>
           <button className="ps-3! flex flex-row gap-2">
@@ -54,7 +54,7 @@ export default function UpdateDocumentList({}) {
           </button>
         </NavLink>
       </div>
-      <div className="rounded-lg bg-white p-8 shadow-md text-primary flex-col max-w-7xl items-center max-h-full overflow-hidden">
+      <div className="rounded-lg bg-white p-8 shadow-md text-primary flex-col max-h-full overflow-hidden">
         <div className="flex flex-row gap-1.5 mb-2 justify-center ">
           <SavePlus className="size-4" />
           <h2 className="text-xs font-semibold">Update documents</h2>

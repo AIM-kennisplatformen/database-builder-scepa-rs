@@ -11,7 +11,7 @@ function App() {
         <Header />
       </div>
       <div className="flex flex-1 min-h-0 items-center justify-center bg-slate-100 overflow-hidden">
-        <div className="w-full max-w-7xl px-4">
+        <div className="w-full px-4">
           <Routes>
             <Route path="/" element={<Navigate to="/updatelist" replace />} />
             <Route path="/upload" element={<UploadDocumentPage />} />

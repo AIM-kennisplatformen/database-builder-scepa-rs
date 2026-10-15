@@ -16,6 +16,7 @@ const VIEWPORT_PADDING = 24;
 const PAGE_GAP = 16;
 const RENDER_MARGIN = "100% 0px"; // render pages up to one viewport away
 const DEFAULT_ASPECT_RATIO = 1.414; // A4 until the first page is measured
+const RESIZE_DEBOUNCE_MS = 150;
 
 // Only mounts the (expensive) canvas/text layers while the slot is near the
 // viewport; the placeholder keeps the scroll height stable meanwhile.
@@ -64,10 +65,21 @@ export default function PdfViewer({ file }) {
       );
     };
 
+    // Re-rendering the pages clears their canvas, so wait until resizing
+    // settles instead of redrawing on every frame of a drag.
+    let timeout;
+    const debouncedUpdateWidth = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(updateWidth, RESIZE_DEBOUNCE_MS);
+    };
+
     updateWidth();
-    const observer = new ResizeObserver(updateWidth);
+    const observer = new ResizeObserver(debouncedUpdateWidth);
     observer.observe(scrollEl);
-    return () => observer.disconnect();
+    return () => {
+      clearTimeout(timeout);
+      observer.disconnect();
+    };
   }, [scrollEl]);
 
   // Track which page is in the middle of the viewport for the indicator.
@@ -115,7 +127,10 @@ export default function PdfViewer({ file }) {
   return (
     <div className="flex h-full w-full flex-col items-center gap-3">
       <div className="relative h-full w-full overflow-hidden rounded border border-border bg-muted/20">
-        <div ref={setScrollEl} className="h-full w-full overflow-auto p-6">
+        <div
+          ref={setScrollEl}
+          className="h-full w-full overflow-auto scrollbar-custom p-6"
+        >
           <Document
             file={file}
             onLoadSuccess={handleLoadSuccess}

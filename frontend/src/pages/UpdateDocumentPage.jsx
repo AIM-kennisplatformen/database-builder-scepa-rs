@@ -1,4 +1,4 @@
-import { ChevronDown, Loader2 } from "lucide-react";
+import { ChevronDown, GripVertical, Loader2 } from "lucide-react";
 import AuthorDisplay from "../components/AuthorDisplay";
 import PdfViewer from "../components/PdfViewer";
 import { useState, useEffect, useRef } from "react";
@@ -262,6 +262,9 @@ export default function UpdateDocumentPage({}) {
   const requiresFixing = searchParams.get("requiresFixing") === "true";
   const [documentData, setDocumentData] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [pdfWidthPercent, setPdfWidthPercent] = useState(66.67);
+  const [isResizing, setIsResizing] = useState(false);
+  const layoutRef = useRef(null);
   const [isBibliographyOpen, setIsBibliographyOpen] = useState(true);
   const [isAuthorsOpen, setIsAuthorsOpen] = useState(false);
   const [bibliographyFieldsData, setBibliographyFieldsData] = useState({
@@ -530,12 +533,57 @@ export default function UpdateDocumentPage({}) {
       .finally(() => setIsSaving(false));
   }
 
+  function handleResizeMove(e) {
+    if (!isResizing || !layoutRef.current) return;
+    const rect = layoutRef.current.getBoundingClientRect();
+    const percent = ((e.clientX - rect.left) / rect.width) * 100;
+    setPdfWidthPercent(Math.min(80, Math.max(20, percent)));
+  }
+
   return (
-    <div className="flex h-screen w-full py-6 mt-1">
-      <div className="w-2/3 h-full overflow-y-auto border-r border-border">
+    <div
+      ref={layoutRef}
+      className={`flex h-screen w-full py-6 mt-1 ${isResizing ? "select-none" : ""}`}
+    >
+      <div
+        className="h-full overflow-y-auto"
+        style={{ width: `${pdfWidthPercent}%` }}
+      >
         {pdfHash && <PdfViewer file={`/api/pdfs/${pdfHash}`} />}
       </div>
-      <div className="w-1/3 h-full overflow-y-auto bg-white p-2 text-black">
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-valuenow={Math.round(pdfWidthPercent)}
+        aria-valuemin={20}
+        aria-valuemax={80}
+        tabIndex={0}
+        title="Drag to resize"
+        className={`group relative flex w-3 h-full shrink-0 cursor-col-resize touch-none items-center justify-center border-x border-border transition-colors hover:bg-primary/30 focus:bg-primary/30 focus:outline-none ${isResizing ? "bg-primary/40" : "bg-gray-200"}`}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          setIsResizing(true);
+        }}
+        onPointerMove={handleResizeMove}
+        onPointerUp={(e) => {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+          setIsResizing(false);
+        }}
+        onPointerCancel={() => setIsResizing(false)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowLeft")
+            setPdfWidthPercent((p) => Math.max(20, p - 2));
+          if (e.key === "ArrowRight")
+            setPdfWidthPercent((p) => Math.min(80, p + 2));
+        }}
+      >
+        <div
+          className={`flex h-12 w-5 items-center justify-center rounded-md border border-border bg-white shadow-md transition-colors group-hover:border-primary group-hover:text-primary ${isResizing ? "border-primary text-primary" : "text-gray-500"}`}
+        >
+          <GripVertical className="size-4" />
+        </div>
+      </div>
+      <div className="flex-1 min-w-0 h-full overflow-y-auto bg-white p-2 text-black">
         {missingFields.length > 0 && (
           <div
             className="mb-4 rounded border border-red-300 bg-red-50 p-3 text-red-800"
