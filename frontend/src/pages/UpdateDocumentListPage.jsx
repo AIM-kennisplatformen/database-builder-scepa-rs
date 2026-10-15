@@ -65,7 +65,7 @@ export default function UpdateDocumentList({}) {
         <p className="text-xs text-muted-foreground italic mt-2 text-center">
           All uploaded documents are shown here.
         </p>
-        <div className="mt-4 w-full flex-1 min-h-0 max-h-96 overflow-auto">
+        <div className="mt-4 w-full flex-1 min-h-0 max-h-96 overflow-auto scrollbar-custom">
           {documents && documents.length > 0 && (
             <CustomTable
               headers={tableHeaders}
