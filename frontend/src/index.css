@@ -85,7 +85,10 @@
   @supports not selector(::-webkit-scrollbar) {
     scrollbar-width: auto;
     scrollbar-color: var(--scrollbar-thumb, var(--primary-dark))
-      var(--scrollbar-track, color-mix(in srgb, var(--primary) 10%, white));
+      var(
+        --scrollbar-track,
+        color-mix(in srgb, var(--primary) 10%, transparent)
+      );
   }
 }
 
