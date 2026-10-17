@@ -1,6 +1,7 @@
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Info } from "lucide-react";
 import { useState } from "react";
 import { TEXT_REGEX, isValidField } from "../utils/validation";
+import { Tooltip } from "react-tooltip";
 
 // Must match the backend's ContributorRole enum exactly (snake_case
 // "author"/"editor") — it rejects the whole save request otherwise.
@@ -9,6 +10,15 @@ const ROLE_OPTIONS = [
   { value: "editor", label: "Editor" },
 ];
 
+/* Example object:
+{
+    key: {Used to identify the fields},
+    label: {Used to render the label above the input field},
+    regex: {Used to validate the input},
+    placeholder: {Used to display the placeholder inside the input},
+    tooltip: {Used to display a 'Information' icon and show a tooltip on hover -> if absent or null/empty it won't display the tooltip or icon}
+  },
+*/
 export const AUTHOR_FIELDS = [
   {
     key: "forename",
@@ -27,6 +37,7 @@ export const AUTHOR_FIELDS = [
     label: "Affiliation",
     regex: TEXT_REGEX,
     placeholder: "Affiliation",
+    tooltip: "Test tooltip",
   },
   {
     key: "role",
@@ -34,6 +45,7 @@ export const AUTHOR_FIELDS = [
     type: "select",
     options: ROLE_OPTIONS,
     regex: "^(author|editor)$",
+    tooltip: "Test tooltip",
   },
 ];
 
@@ -101,8 +113,21 @@ export default function AuthorDisplay({
 
             return (
               <div className="flex flex-col py-1" key={field.key}>
-                <label className="text-sm text-primary font-medium">
+                <label className="text-sm text-primary font-medium flex flex-row gap-2">
                   {field.label}
+                  {field.tooltip && (
+                    <>
+                      <Info
+                        className="size-4"
+                        data-tooltip-id="author-tip"
+                        data-tooltip-content={`${field.tooltip}`}
+                      />
+                      <Tooltip
+                        id="author-tip"
+                        className="text-white! bg-primary! rounded-lg! italic!"
+                      />
+                    </>
+                  )}
                 </label>
                 {field.type === "select" ? (
                   <select

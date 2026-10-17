@@ -1,4 +1,4 @@
-import { ChevronDown, GripVertical, Loader2 } from "lucide-react";
+import { ChevronDown, GripVertical, Info, Loader2 } from "lucide-react";
 import AuthorDisplay from "../components/AuthorDisplay";
 import PdfViewer from "../components/PdfViewer";
 import { useState, useEffect, useRef } from "react";
@@ -10,6 +10,17 @@ import { AUTHOR_FIELDS } from "../components/AuthorDisplay";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import CustomSuccessToast from "../components/CustomSuccessToast";
+import { Tooltip } from "react-tooltip";
+
+/* Example object:
+{
+    key: {Used to identify the fields},
+    label: {Used to render the label above the input field},
+    regex: {Used to validate the input},
+    placeholder: {Used to display the placeholder inside the input},
+    tooltip: {Used to display a 'Information' icon and show a tooltip on hover -> if absent or null/empty it won't display the tooltip or icon}
+  },
+*/
 
 const BIBLIOGRAPHY_FIELDS = [
   {
@@ -18,6 +29,7 @@ const BIBLIOGRAPHY_FIELDS = [
     type: "text",
     regex: TEXT_REGEX,
     placeholder: "Energy poverty solotions",
+    tooltip: "Test tooltip",
   },
   {
     key: "publication_date",
@@ -25,6 +37,7 @@ const BIBLIOGRAPHY_FIELDS = [
     type: "text",
     regex: "^(\\d{4}-)?\\d{2}-\\d{2}$",
     placeholder: "yyyy-mm-dd or mm-dd",
+    tooltip: "Test tooltip",
   },
   {
     key: "publication_year",
@@ -32,6 +45,7 @@ const BIBLIOGRAPHY_FIELDS = [
     type: "text",
     regex: "^\\d{4}$",
     placeholder: " 2026",
+    tooltip: "Test tooltip",
   },
   {
     key: "journal",
@@ -39,6 +53,7 @@ const BIBLIOGRAPHY_FIELDS = [
     type: "text",
     regex: TEXT_REGEX,
     placeholder: "Journal",
+    tooltip: "Test tooltip",
   },
   {
     key: "journal_abbreviation",
@@ -46,6 +61,7 @@ const BIBLIOGRAPHY_FIELDS = [
     type: "text",
     regex: "^[A-Za-zÀ-ÖØ-öø-ÿ0-9\\s.&-]+$",
     placeholder: "Journal abbreviation",
+    tooltip: "Test tooltip",
   },
   {
     key: "publisher",
@@ -53,6 +69,7 @@ const BIBLIOGRAPHY_FIELDS = [
     type: "text",
     regex: TEXT_REGEX,
     placeholder: "Publisher",
+    tooltip: "Test tooltip",
   },
 ];
 
@@ -615,7 +632,22 @@ export default function UpdateDocumentPage({}) {
                 BIBLIOGRAPHY_FIELDS.map((field) => (
                   <div key={field.key}>
                     <label className="flex flex-col gap-1 text-sm text-primary">
-                      <span className="font-medium">{field.label}</span>
+                      <span className="font-medium flex flex-row gap-2">
+                        {field.label}
+                        {field.tooltip && (
+                          <>
+                            <Info
+                              className="size-4"
+                              data-tooltip-id="bibliography-tip"
+                              data-tooltip-content={field.tooltip}
+                            />
+                            <Tooltip
+                              id="bibliography-tip"
+                              className="text-white! bg-primary! rounded-lg! italic!"
+                            />
+                          </>
+                        )}
+                      </span>
                       <input
                         type={field.type}
                         defaultValue={bibliographyFieldDisplayValue(
