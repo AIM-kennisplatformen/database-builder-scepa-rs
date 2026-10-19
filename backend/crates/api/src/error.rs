@@ -6,6 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use scepa::{
+    conflict::Conflict,
     document_upload::DocumentUploadError,
     models::canonical::CanonicalMissingField,
     postgres::ReviewCase,
@@ -199,49 +200,54 @@ pub(crate) async fn document_upload_error(
             error
         }
         DocumentUploadError::Storage(source) => {
-            if let Some(conflict) = source
+            let conflict = source
                 .get_ref()
-                .and_then(|error| error.downcast_ref::<scepa::conflict::Conflict>())
-            {
-                let action = if *conflict == scepa::conflict::Conflict::DuplicatePdf {
-                    "Open the existing document to review or update it"
-                } else {
-                    "Use a new workflow identifier or refresh the existing submission"
-                };
-                let mut error = api_error(StatusCode::CONFLICT, conflict.to_string(), action);
-                add_error_context(&mut error, workflow_id, pdf_hash, None);
-                return error;
-            }
-            tracing::error!(error = %source, %workflow_id, "PDF storage pipeline failed");
-            let case = latest_review_case(state, workflow_id).await;
-            let mut error = if case
-                .as_ref()
-                .is_some_and(|case| case.service == "garage" && case.phase == "input_validation")
-            {
-                api_error(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "The uploaded file is not a valid PDF",
-                    "Choose a non-empty PDF file and upload it again",
-                )
-            } else if case.is_some() {
-                api_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "The PDF could not be stored correctly",
-                    "Try again; if the problem continues, contact support",
-                )
+                .and_then(|error| error.downcast_ref::<Conflict>())
+                .copied();
+            let case = if conflict.is_some() {
+                None
             } else {
-                api_error(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "Document storage is temporarily unavailable",
-                    "Wait a moment and upload the PDF again",
-                )
+                tracing::error!(error = %source, %workflow_id, "PDF storage pipeline failed");
+                latest_review_case(state, workflow_id).await
             };
+            let mut error = classify_storage_error(conflict, case.as_ref());
             add_error_context(&mut error, workflow_id, pdf_hash, case.as_ref());
             error
         }
         DocumentUploadError::Workflow(error) => {
             restate_api_error(state, error, pdf_hash, None).await
         }
+    }
+}
+
+fn classify_storage_error(conflict: Option<Conflict>, case: Option<&ReviewCase>) -> ApiError {
+    if let Some(conflict) = conflict {
+        let action = if conflict == Conflict::DuplicatePdf {
+            "Open the existing document to review or update it"
+        } else {
+            "Use a new workflow identifier or refresh the existing submission"
+        };
+        return api_error(StatusCode::CONFLICT, conflict.to_string(), action);
+    }
+
+    if case.is_some_and(|case| case.service == "garage" && case.phase == "input_validation") {
+        api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The uploaded file is not a valid PDF",
+            "Choose a non-empty PDF file and upload it again",
+        )
+    } else if case.is_some() {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "The PDF could not be stored correctly",
+            "Try again; if the problem continues, contact support",
+        )
+    } else {
+        api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Document storage is temporarily unavailable",
+            "Wait a moment and upload the PDF again",
+        )
     }
 }
 
@@ -473,6 +479,43 @@ mod tests {
             "Internal server error",
         )
         .await;
+    }
+
+    #[test]
+    fn storage_failures_use_semantic_statuses() {
+        let mut case = ReviewCase {
+            id: 42,
+            workflow_id: "upload:workflow-1".into(),
+            pdf_hash: None,
+            service: "garage".into(),
+            phase: "input_validation".into(),
+            retryable: false,
+            error_message: String::new(),
+            artifact_content_type: String::new(),
+            artifact_size: 0,
+            status: String::new(),
+            resolution: None,
+            created_at: String::new(),
+            resolved_at: None,
+        };
+
+        assert_eq!(
+            classify_storage_error(Some(Conflict::DuplicatePdf), None).0,
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            classify_storage_error(None, Some(&case)).0,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        case.phase = "storage".into();
+        assert_eq!(
+            classify_storage_error(None, Some(&case)).0,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            classify_storage_error(None, None).0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
     }
 
     #[test]
