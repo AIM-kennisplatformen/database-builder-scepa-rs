@@ -14,7 +14,7 @@ export default function CustomTable({
             {headers.map((header) => (
               <th
                 key={header.title}
-                className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide"
+                className="relative px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide"
               >
                 <button
                   className="-ml-3 flex flex-row gap-2 items-center px-3! py-2! bg-green-100! text-green-900! hover:bg-green-200!"
@@ -31,6 +31,11 @@ export default function CustomTable({
                     />
                   )}
                 </button>
+                {header.menu && (
+                  <div className="absolute left-0 top-full z-20 mt-1 normal-case tracking-normal">
+                    {header.menu}
+                  </div>
+                )}
               </th>
             ))}
           </tr>

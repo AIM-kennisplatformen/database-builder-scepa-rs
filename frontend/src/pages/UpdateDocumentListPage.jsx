@@ -4,11 +4,14 @@ import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { toast, ToastContainer } from "react-toastify";
 import SearchBox from "../components/SearchBox";
+import DocumentStatusSortMenu from "../components/DocumentStatusSortMenu";
 
 export default function UpdateDocumentList({}) {
   const [documents, setDocuments] = useState(null);
   const [search, setSearch] = useState("");
   const [alphabeticSort, setAlphabeticSort] = useState(true);
+  const [isStatusMenuOpen, setIsStatusMenuOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState(null);
 
   const navigate = useNavigate();
 
@@ -20,9 +23,21 @@ export default function UpdateDocumentList({}) {
     },
     {
       title: "Published",
+      isIconDown: true,
       onClick: null,
     },
-    { title: "Status", onClick: null },
+    {
+      title: "Status",
+      isIconDown: !isStatusMenuOpen,
+      onClick: () => setIsStatusMenuOpen(!isStatusMenuOpen),
+      menu: isStatusMenuOpen ? (
+        <DocumentStatusSortMenu
+          selected={statusFilter}
+          onChange={setStatusFilter}
+          onClose={() => setIsStatusMenuOpen(false)}
+        />
+      ) : null,
+    },
   ];
 
   useEffect(() => {
@@ -64,6 +79,13 @@ export default function UpdateDocumentList({}) {
     .filter((document) =>
       (document.title ?? "").toLowerCase().includes(search.toLowerCase()),
     )
+    .filter(
+      (document) =>
+        statusFilter === null ||
+        statusFilter.includes(
+          document.requiresFixing ? "requiresFixing" : "published",
+        ),
+    )
     .sort((a, b) => {
       if (!a.title && !b.title) return 0;
       if (!a.title) return 1;
@@ -93,7 +115,7 @@ export default function UpdateDocumentList({}) {
         <p className="text-xs text-muted-foreground italic mt-2 text-center">
           All uploaded documents are shown here.
         </p>
-        <div className="mt-4 w-full flex-1 min-h-0 max-h-96 overflow-auto scrollbar-custom">
+        <div className="mt-4 w-full h-96 overflow-auto scrollbar-custom">
           {documents && documents.length > 0 && (
             <>
               <div className="my-2 p-2 flex flex-row justify-between border-t ">
