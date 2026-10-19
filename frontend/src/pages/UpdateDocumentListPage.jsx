@@ -1,13 +1,29 @@
 import { SavePlus, Upload } from "lucide-react";
 import CustomTable from "../components/CustomTable";
-import react, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { toast, ToastContainer } from "react-toastify";
+import SearchBox from "../components/SearchBox";
 
 export default function UpdateDocumentList({}) {
-  const tableHeaders = ["Title", "Published", "Status"];
   const [documents, setDocuments] = useState(null);
+  const [search, setSearch] = useState("");
+  const [alphabeticSort, setAlphabeticSort] = useState(true);
+
   const navigate = useNavigate();
+
+  const tableHeaders = [
+    {
+      title: "Title",
+      isFilterable: true,
+      onClick: () => setAlphabeticSort(!alphabeticSort),
+    },
+    {
+      title: "Published",
+      onClick: null,
+    },
+    { title: "Status", onClick: null },
+  ];
 
   useEffect(() => {
     loadDocuments();
@@ -44,6 +60,18 @@ export default function UpdateDocumentList({}) {
     }
   }
 
+  const visibleDocuments = (documents ?? [])
+    .filter((document) =>
+      (document.title ?? "").toLowerCase().includes(search.toLowerCase()),
+    )
+    .sort((a, b) => {
+      if (!a.title && !b.title) return 0;
+      if (!a.title) return 1;
+      if (!b.title) return -1;
+      const result = a.title.localeCompare(b.title);
+      return alphabeticSort ? result : -result;
+    });
+
   return (
     <div className="flex flex-col w-full max-w-7xl mx-auto justify-center">
       <div className="flex justify-end my-3">
@@ -67,11 +95,23 @@ export default function UpdateDocumentList({}) {
         </p>
         <div className="mt-4 w-full flex-1 min-h-0 max-h-96 overflow-auto scrollbar-custom">
           {documents && documents.length > 0 && (
-            <CustomTable
-              headers={tableHeaders}
-              documents={documents}
-              onClickHandler={tableOnClickHandler}
-            />
+            <>
+              <div className="my-2 p-2 flex flex-row justify-between border-t ">
+                <SearchBox setSearch={setSearch} />
+                <p className="text-sm text-gray-600">
+                  Showing{" "}
+                  <span className="font-bold text-black">
+                    {visibleDocuments.length}
+                  </span>{" "}
+                  from the {documents.length} documents
+                </p>
+              </div>
+              <CustomTable
+                headers={tableHeaders}
+                documents={visibleDocuments}
+                onClickHandler={tableOnClickHandler}
+              />
+            </>
           )}
           {documents && documents.length === 0 && (
             <p className="text-lg text-primary justify-center flex">
