@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, ChevronsUpDown } from "lucide-react";
+import { ChevronRight, ChevronsUpDown } from "lucide-react";
 
 export default function CustomTable({
   headers,
@@ -24,11 +24,7 @@ export default function CustomTable({
                   {header.isFilterable ? (
                     <ChevronsUpDown className="size-4" />
                   ) : (
-                    <ChevronDown
-                      className={`size-5 transition-transform duration-200 ${
-                        header.isIconDown ? "" : "rotate-180"
-                      }`}
-                    />
+                    header.icon
                   )}
                 </button>
                 {header.menu && (

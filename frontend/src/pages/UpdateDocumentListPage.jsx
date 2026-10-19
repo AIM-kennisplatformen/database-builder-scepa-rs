@@ -1,4 +1,13 @@
-import { SavePlus, Upload } from "lucide-react";
+import {
+  ArrowDownAZ,
+  ArrowUpZA,
+  CalendarArrowDown,
+  CalendarArrowUp,
+  Funnel,
+  SavePlus,
+  Upload,
+  X,
+} from "lucide-react";
 import CustomTable from "../components/CustomTable";
 import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
@@ -10,6 +19,9 @@ export default function UpdateDocumentList({}) {
   const [documents, setDocuments] = useState(null);
   const [search, setSearch] = useState("");
   const [alphabeticSort, setAlphabeticSort] = useState(true);
+  const [chronologicalSort, setChronologicalSort] = useState(false);
+  // The most recently clicked column decides what the table is sorted on.
+  const [sortKey, setSortKey] = useState("title");
   const [isStatusMenuOpen, setIsStatusMenuOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState(null);
 
@@ -18,17 +30,40 @@ export default function UpdateDocumentList({}) {
   const tableHeaders = [
     {
       title: "Title",
-      isFilterable: true,
-      onClick: () => setAlphabeticSort(!alphabeticSort),
+      isFilterable: sortKey !== "title",
+      icon: alphabeticSort ? (
+        <ArrowDownAZ className="size-4" />
+      ) : (
+        <ArrowUpZA className="size-4" />
+      ),
+      onClick: () => {
+        setSortKey("title");
+        setAlphabeticSort(!alphabeticSort);
+      },
     },
     {
       title: "Published",
-      isIconDown: true,
-      onClick: null,
+      // Show the neutral icon while another column is the active sort.
+      isFilterable: sortKey !== "published_at",
+      icon: chronologicalSort ? (
+        <CalendarArrowUp className="size-4" />
+      ) : (
+        <CalendarArrowDown className="size-4" />
+      ),
+      onClick: () => {
+        setSortKey("published_at");
+        setChronologicalSort(!chronologicalSort);
+      },
     },
     {
       title: "Status",
-      isIconDown: !isStatusMenuOpen,
+      icon: isStatusMenuOpen ? (
+        <X className="size-4" />
+      ) : statusFilter == null ? (
+        <Funnel className="size-4" />
+      ) : (
+        <Funnel className="size-4 fill-current" />
+      ),
       onClick: () => setIsStatusMenuOpen(!isStatusMenuOpen),
       menu: isStatusMenuOpen ? (
         <DocumentStatusSortMenu
@@ -87,11 +122,18 @@ export default function UpdateDocumentList({}) {
         ),
     )
     .sort((a, b) => {
-      if (!a.title && !b.title) return 0;
-      if (!a.title) return 1;
-      if (!b.title) return -1;
-      const result = a.title.localeCompare(b.title);
-      return alphabeticSort ? result : -result;
+      // Documents with a missing value always sort last.
+      if (!a[sortKey] && !b[sortKey]) return 0;
+      if (!a[sortKey]) return 1;
+      if (!b[sortKey]) return -1;
+
+      if (sortKey === "title") {
+        const result = a.title.localeCompare(b.title);
+        return alphabeticSort ? result : -result;
+      }
+
+      const result = new Date(a.published_at) - new Date(b.published_at);
+      return chronologicalSort ? result : -result;
     });
 
   return (
