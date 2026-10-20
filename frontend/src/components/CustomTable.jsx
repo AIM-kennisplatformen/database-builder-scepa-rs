@@ -17,7 +17,7 @@ export default function CustomTable({
                 className="relative px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide"
               >
                 <button
-                  className="-ml-3 flex flex-row gap-2 items-center px-3! py-2! bg-green-100! text-green-900! hover:bg-green-200!"
+                  className="-ml-3 flex flex-row gap-2 items-center px-3! py-2! bg-white! text-green-900! hover:bg-green-200!"
                   onClick={header.onClick}
                 >
                   {header.title}
