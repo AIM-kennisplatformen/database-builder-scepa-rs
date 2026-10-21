@@ -1,4 +1,5 @@
-mod api;
+mod endpoints;
+mod error;
 
 use std::{
     error::Error,
@@ -262,7 +263,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .await?;
 
     let api_listener = TcpListener::bind(config.api_address).await?;
-    let state = api::AppState::new(
+    let state = endpoints::AppState::new(
         RestateClient::new(&config.restate_ingress_url)?,
         garage_pipeline,
         review_store,
@@ -273,7 +274,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         restate_ingress_url = %config.restate_ingress_url,
         "starting SCEPA API and Restate endpoint"
     );
-    axum::serve(api_listener, api::router(state)).await?;
+    axum::serve(api_listener, endpoints::router(state)).await?;
     Ok(())
 }
 

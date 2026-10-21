@@ -37,7 +37,8 @@ impl PostgresPdfStore {
         Self { pool }
     }
 
-    pub async fn upsert(&self, pdf: &StoredPdf) -> eros::Result<StoredPdf> {
+    pub async fn insert(&self, pdf: &StoredPdf) -> eros::Result<StoredPdf> {
+        let mut transaction = self.pool.begin().await?;
         sqlx::query(
             r#"
             INSERT INTO document_artifacts (pdf_hash) VALUES ($1)
@@ -45,18 +46,14 @@ impl PostgresPdfStore {
             "#,
         )
         .bind(&pdf.pdf_hash)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
 
-        Ok(sqlx::query_as(
+        let stored = sqlx::query_as(
             r#"
             INSERT INTO pdf_files (pdf_hash, bucket, object_key, content_type, size_bytes)
             VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (pdf_hash) DO UPDATE SET
-                bucket = EXCLUDED.bucket,
-                object_key = EXCLUDED.object_key,
-                content_type = EXCLUDED.content_type,
-                size_bytes = EXCLUDED.size_bytes
+            ON CONFLICT DO NOTHING
             RETURNING pdf_hash, bucket, object_key, content_type, size_bytes,
                       created_at::text AS created_at
             "#,
@@ -66,8 +63,13 @@ impl PostgresPdfStore {
         .bind(&pdf.object_key)
         .bind(&pdf.content_type)
         .bind(pdf.size_bytes)
-        .fetch_one(&self.pool)
-        .await?)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let Some(stored) = stored else {
+            return Err(crate::conflict::Conflict::DuplicatePdf.into_io().into());
+        };
+        transaction.commit().await?;
+        Ok(stored)
     }
 
     pub async fn get(&self, pdf_hash: &str) -> eros::Result<Option<StoredPdf>> {
@@ -288,10 +290,13 @@ impl GaragePipelineService {
 
     async fn store(&self, bytes: &[u8]) -> eros::Result<StoredPdf> {
         let pdf_hash = sha256_hex(bytes);
+        if self.metadata.get(&pdf_hash).await?.is_some() {
+            return Err(crate::conflict::Conflict::DuplicatePdf.into_io().into());
+        }
         let object_key = format!("{pdf_hash}.pdf");
         self.garage.put(&self.bucket, &object_key, bytes).await?;
         self.metadata
-            .upsert(&StoredPdf {
+            .insert(&StoredPdf {
                 pdf_hash,
                 bucket: self.bucket.clone(),
                 object_key,

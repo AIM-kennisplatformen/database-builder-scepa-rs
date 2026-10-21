@@ -60,7 +60,7 @@ docker compose -f compose.release.yaml up --build
 The stack exposes:
 
 - Axum API: `http://localhost:3000`
-- React UI: `http://localhost:5173`
+- React UI: `http://localhost:5173/upload/`
 - Grobid: `http://localhost:8070`
 - Garage S3 API: `http://localhost:3900`
 - Garage admin API: `http://localhost:3903`
@@ -73,6 +73,117 @@ The stack exposes:
 - SCEPA literature MCP: `http://localhost:8002/mcp`
 - Qdrant HTTP/gRPC: `localhost:6333` / `localhost:6334`
 - SonarQube with `tools`: `http://localhost:9000`
+
+## Release deployment and administrative access
+
+`compose.release.yaml` builds the `release` Dockerfile stages for the API,
+frontend, and MCP services. All published ports bind to `127.0.0.1` in release
+mode. This keeps the services reachable from the deployment host while
+preventing direct access through the VM's public network interfaces.
+
+The frontend and MCP loopback ports are intended as upstreams for a reverse
+proxy such as Caddy, which should provide public HTTPS on ports 80 and 443. The
+remaining ports are for administrators and should not be changed to
+`0.0.0.0`. Access them remotely through SSH tunnels instead.
+
+| Service | Local endpoint |
+| --- | --- |
+| Frontend, including the `/upload/api/` proxy | `http://127.0.0.1:5173/upload/` |
+| API, for direct diagnostics | `http://127.0.0.1:3000` |
+| Literature MCP | `http://127.0.0.1:8002/mcp` |
+| TypeDB gRPC | `127.0.0.1:1729` |
+| TypeDB HTTP | `http://127.0.0.1:8000` |
+| PostgreSQL | `127.0.0.1:5432` |
+| Qdrant HTTP | `http://127.0.0.1:6333` |
+| Qdrant gRPC | `127.0.0.1:6334` |
+| Garage S3 API | `http://127.0.0.1:3900` |
+| Garage admin API | `http://127.0.0.1:3903` |
+| Grobid | `http://127.0.0.1:8070` |
+| Restate ingress | `http://127.0.0.1:8080` |
+| Restate admin UI/API | `http://127.0.0.1:9070` |
+| Restate fabric | `127.0.0.1:5122` |
+
+To access one service from an administrator workstation, forward its port over
+SSH. For example, this exposes the Restate admin UI at
+`http://localhost:9070` on the workstation:
+
+```bash
+ssh -N -L 9070:127.0.0.1:9070 user@your-vm
+```
+
+Multiple services can be forwarded in one session. This example provides local
+access to Restate, Qdrant, TypeDB HTTP, Garage admin, and PostgreSQL:
+
+```bash
+ssh -N \
+  -L 9070:127.0.0.1:9070 \
+  -L 6333:127.0.0.1:6333 \
+  -L 8000:127.0.0.1:8000 \
+  -L 3903:127.0.0.1:3903 \
+  -L 5432:127.0.0.1:5432 \
+  user@your-vm
+```
+
+Keep the SSH session open while using the forwarded services. Replace
+`user@your-vm` with the deployment account and VM hostname. If a workstation
+port is already occupied, change only the first port in that forwarding rule;
+for example, `-L 15432:127.0.0.1:5432` makes PostgreSQL available locally on
+port `15432`.
+
+Port variables in `.env` change both the VM loopback port and the corresponding
+SSH-tunnel source port. Inspect the effective release configuration before
+deployment with:
+
+```bash
+docker compose -f compose.release.yaml config
+```
+
+### Single-host HTTPS routing
+
+The frontend uses `/upload/` as its base path in development and release builds.
+Local development serves the upload page at
+`http://localhost:5173/upload/`; a deployment preserves the same path at
+`https://scepakp.mads-han.src.surf-hosted.nl/upload/`.
+
+The release Nginx container accepts `/upload/` directly and proxies
+`/upload/api/` to the API container. Caddy must therefore preserve the prefix
+rather than stripping it:
+
+```caddy
+scepakp.mads-han.src.surf-hosted.nl {
+    encode zstd gzip
+
+    handle /mcp* {
+        reverse_proxy 127.0.0.1:8002 {
+            flush_interval -1
+        }
+    }
+
+    redir /upload /upload/ 308
+
+    handle /upload/* {
+        basic_auth {
+            operator REPLACE_WITH_CADDY_PASSWORD_HASH
+        }
+
+        reverse_proxy 127.0.0.1:5173
+    }
+
+    redir /chatep /chatep/ 308
+
+    handle /chatep/* {
+        reverse_proxy 127.0.0.1:10090
+    }
+
+    handle {
+        respond "Not found" 404
+    }
+}
+```
+
+This serves Studio and its API and Socket.IO routes under `/chatep/`, serves
+the bearer-token-protected literature MCP at `/mcp`, and keeps the SCEPA
+operator UI and its API under the Basic-authenticated `/upload/` path.
 
 ## API
 
@@ -134,6 +245,11 @@ fixed data through `UpdateDocumentWorkflow`, respectively. External enrichment
 is represented by the repair contract but intentionally returns `501` until an
 enrichment service exists.
 
+The shared edit and repair form can manually classify a document for any of the
+`strategic_overview`, `best_practices`, and `target_groups` personas and as
+`grey_literature`, `scientific_literature`, or `project_report`. Classification
+is optional and is never inferred during PDF ingestion.
+
 ## Pipeline CLI
 
 The CLI sends uploads to `SCEPA_API_URL` (default `http://localhost:3000`) and
@@ -157,11 +273,11 @@ in the separate `scepa-cli` crate.
 
 The self-contained project under `mcp/` exposes authenticated Streamable HTTP at
 `/mcp`. `search_literature` first obtains eligible PDF hashes from TypeDB using
-publication-date, document-type, and organization filters, similarity-searches
+publication-date, document-type, user-persona, and organization filters, similarity-searches
 `4 × top_k` source passages in Qdrant, resolves their linked combined passages,
 and reranks them locally. Search responses always include bibliographic metadata
-and deterministic IEEE references keyed by each result's `pdf_hash`. Hashes are
-opaque association keys, not user-facing citations.
+as deterministic IEEE references with passages grouped by document. PDF hashes
+and reranker scores remain internal and are not returned by the MCP tool.
 
 Set `MCP_BEARER_TOKEN` before starting the service. The unquantized
 `cross-encoder/ms-marco-MiniLM-L6-v2` ONNX model is downloaded on first startup

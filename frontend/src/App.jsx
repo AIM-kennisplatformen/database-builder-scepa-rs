@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import Header from "./components/Header";
 import UploadDocumentPage from "./pages/UploadDocumentPage";
 import UpdateDocumentListPage from "./pages/UpdateDocumentListPage";
@@ -13,8 +13,7 @@ function App() {
       <div className="flex flex-1 min-h-0 items-center justify-center bg-slate-100 overflow-hidden">
         <div className="w-full max-w-7xl px-4">
           <Routes>
-            <Route path="/" element={<Navigate to="/updatelist" replace />} />
-            <Route path="/upload" element={<UploadDocumentPage />} />
+            <Route path="/" element={<UploadDocumentPage />} />
             <Route path="/updatelist" element={<UpdateDocumentListPage />} />
             <Route path="/update/:pdf_hash" element={<UpdateDocumentPage />} />
           </Routes>
