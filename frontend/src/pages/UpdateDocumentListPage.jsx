@@ -3,6 +3,8 @@ import {
   ArrowUpZA,
   CalendarArrowDown,
   CalendarArrowUp,
+  ChevronLeft,
+  ChevronRight,
   Funnel,
   SavePlus,
   Upload,
@@ -24,6 +26,8 @@ export default function UpdateDocumentList({}) {
   const [sortKey, setSortKey] = useState("title");
   const [isStatusMenuOpen, setIsStatusMenuOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState(null);
+  const [currentPage, setCurrentPage] = useState(2);
+  const pageSize = 7;
 
   const navigate = useNavigate();
 
@@ -136,6 +140,28 @@ export default function UpdateDocumentList({}) {
       return chronologicalSort ? result : -result;
     });
 
+  const totalPages = Math.ceil(visibleDocuments.length / pageSize);
+
+  const paginatedDocuments = visibleDocuments.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize,
+  );
+
+  function toNextPage() {
+    if (currentPage + 1 > totalPages) return;
+    setCurrentPage(currentPage + 1);
+  }
+
+  function toPrevPage() {
+    if (currentPage - 1 < 1) return;
+    setCurrentPage(currentPage - 1);
+  }
+
+  useEffect(
+    () => setCurrentPage(1),
+    [search, statusFilter, sortKey, alphabeticSort, chronologicalSort],
+  );
+
   return (
     <div className="flex flex-col w-full max-w-7xl mx-auto justify-center">
       <div className="flex justify-end my-3">
@@ -157,31 +183,53 @@ export default function UpdateDocumentList({}) {
         <p className="text-xs text-muted-foreground italic mt-2 text-center">
           All uploaded documents are shown here.
         </p>
-        <div className="mt-4 w-full h-96 overflow-auto scrollbar-custom">
+
+        {documents && documents.length > 0 && (
+          <div className="mt-4 p-2 flex flex-row justify-between border-t">
+            <SearchBox setSearch={setSearch} />
+            <p className="text-sm text-gray-600">
+              Showing{" "}
+              <span className="font-bold text-black">
+                {paginatedDocuments.length}
+              </span>{" "}
+              from the {documents.length} documents
+            </p>
+          </div>
+        )}
+
+        <div className="w-full h-96 overflow-auto scrollbar-custom">
           {documents && documents.length > 0 && (
-            <>
-              <div className="my-2 p-2 flex flex-row justify-between border-t ">
-                <SearchBox setSearch={setSearch} />
-                <p className="text-sm text-gray-600">
-                  Showing{" "}
-                  <span className="font-bold text-black">
-                    {visibleDocuments.length}
-                  </span>{" "}
-                  from the {documents.length} documents
-                </p>
-              </div>
-              <CustomTable
-                headers={tableHeaders}
-                documents={visibleDocuments}
-                onClickHandler={tableOnClickHandler}
-              />
-            </>
+            <CustomTable
+              headers={tableHeaders}
+              documents={paginatedDocuments}
+              onClickHandler={tableOnClickHandler}
+            />
           )}
           {documents && documents.length === 0 && (
             <p className="text-lg text-primary justify-center flex">
               No uploaded documents found
             </p>
           )}
+        </div>
+        <div className="flex justify-center gap-3 rounded-xl px-3 py-1 mx-auto items-center">
+          <button
+            className="p-1! text-xs!"
+            onClick={() => toPrevPage()}
+            disabled={currentPage - 1 < 1}
+          >
+            <ChevronLeft />
+          </button>
+          <p className="text-sm underline">
+            <span className="font-bold">{currentPage}</span>
+            {""} of {totalPages}
+          </p>
+          <button
+            className="p-1! text-xs!"
+            onClick={() => toNextPage()}
+            disabled={currentPage + 1 > totalPages}
+          >
+            <ChevronRight />
+          </button>
         </div>
         <ToastContainer />
       </div>
