@@ -145,6 +145,21 @@ Local development serves the upload page at
 `http://localhost:5173/upload/`; a deployment preserves the same path at
 `https://scepakp.mads-han.src.surf-hosted.nl/upload/`.
 
+SCEPA handles Authentik login itself. Set `OAUTH_CLIENT_ID`,
+`OAUTH_CLIENT_SECRET`, `OAUTH_DISCOVERY_URL`, and
+`SESSION_SECRET` in the SCEPA environment. Register SCEPA's own callback URL
+with Authentik and set `OAUTH_REDIRECT_URI` to that exact URL. For this HTTPS
+deployment, use
+`https://scepakp.mads-han.src.surf-hosted.nl/upload/api/auth/callback`.
+Set `FRONTEND_BASE_URL` to
+`https://scepakp.mads-han.src.surf-hosted.nl/upload/`. These are the same
+variable names used by Studio, but SCEPA needs its own Authentik OAuth
+application and callback. The browser starts at SCEPA's `/upload/api/auth/login`;
+the API checks its own session on every document and documentation route.
+SCEPA's `/upload/api/auth/logout` handler clears the SCEPA session and
+redirects the browser to `OAUTH_LOGOUT_URL`, which should point to Authentik's
+end-session endpoint.
+
 The release Nginx container accepts `/upload/` directly and proxies
 `/upload/api/` to the API container. Caddy must therefore preserve the prefix
 rather than stripping it:
@@ -162,10 +177,6 @@ scepakp.mads-han.src.surf-hosted.nl {
     redir /upload /upload/ 308
 
     handle /upload/* {
-        basic_auth {
-            operator REPLACE_WITH_CADDY_PASSWORD_HASH
-        }
-
         reverse_proxy 127.0.0.1:5173
     }
 
@@ -182,8 +193,9 @@ scepakp.mads-han.src.surf-hosted.nl {
 ```
 
 This serves Studio and its API and Socket.IO routes under `/chatep/`, serves
-the bearer-token-protected literature MCP at `/mcp`, and keeps the SCEPA
-operator UI and its API under the Basic-authenticated `/upload/` path.
+the bearer-token-protected literature MCP at `/mcp`, and routes the SCEPA
+operator UI and its API under `/upload/`. SCEPA enforces its own login and API
+session checks, including when its API is accessed directly on port 3000.
 
 ## API
 

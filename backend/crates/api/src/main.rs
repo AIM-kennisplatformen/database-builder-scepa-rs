@@ -147,6 +147,35 @@ struct Config {
         default_value = ""
     )]
     qdrant_api_key: String,
+
+    #[arg(long, env = "OAUTH_DISCOVERY_URL")]
+    oauth_discovery_url: String,
+
+    #[arg(long, env = "OAUTH_CLIENT_ID")]
+    oauth_client_id: String,
+
+    #[arg(long, env = "OAUTH_CLIENT_SECRET", hide_env_values = true)]
+    oauth_client_secret: String,
+
+    #[arg(long, env = "OAUTH_LOGOUT_URL")]
+    oauth_logout_url: String,
+
+    #[arg(
+        long,
+        env = "OAUTH_REDIRECT_URI",
+        default_value = "http://localhost:5173/upload/api/auth/callback"
+    )]
+    oauth_redirect_uri: String,
+
+    #[arg(
+        long,
+        env = "FRONTEND_BASE_URL",
+        default_value = "http://localhost:5173/upload/"
+    )]
+    frontend_base_url: String,
+
+    #[arg(long, env = "SESSION_SECRET", hide_env_values = true)]
+    session_secret: String,
 }
 
 impl Config {
@@ -263,6 +292,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .await?;
 
     let api_listener = TcpListener::bind(config.api_address).await?;
+    let auth = endpoints::auth::AuthState::discover(
+        &config.oauth_discovery_url,
+        config.oauth_client_id,
+        config.oauth_client_secret,
+        &config.oauth_redirect_uri,
+        &config.frontend_base_url,
+        &config.oauth_logout_url,
+    )
+    .await?;
+    let sessions =
+        endpoints::auth::session_layer(&config.session_secret, &config.oauth_redirect_uri)?;
     let state = endpoints::AppState::new(
         RestateClient::new(&config.restate_ingress_url)?,
         garage_pipeline,
@@ -274,7 +314,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         restate_ingress_url = %config.restate_ingress_url,
         "starting SCEPA API and Restate endpoint"
     );
-    axum::serve(api_listener, endpoints::router(state)).await?;
+    axum::serve(api_listener, endpoints::router(state, auth).layer(sessions)).await?;
     Ok(())
 }
 
@@ -361,6 +401,16 @@ mod tests {
             "password",
             "--openai-api-key",
             "openai-key",
+            "--oauth-discovery-url",
+            "https://auth.example/application/o/scepa/.well-known/openid-configuration",
+            "--oauth-client-id",
+            "scepa",
+            "--oauth-client-secret",
+            "client-secret",
+            "--oauth-logout-url",
+            "https://auth.example/application/o/scepa/end-session/",
+            "--session-secret",
+            "test-session-secret",
         ]
     }
 
