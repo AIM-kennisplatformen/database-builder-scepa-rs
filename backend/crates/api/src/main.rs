@@ -160,6 +160,12 @@ struct Config {
     #[arg(long, env = "OAUTH_LOGOUT_URL")]
     oauth_logout_url: String,
 
+    #[arg(long, env = "OAUTH_REQUIRED_CLAIM", default_value = "roles")]
+    oauth_required_claim: String,
+
+    #[arg(long, env = "OAUTH_REQUIRED_ROLE")]
+    oauth_required_role: String,
+
     #[arg(
         long,
         env = "OAUTH_REDIRECT_URI",
@@ -299,6 +305,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         &config.oauth_redirect_uri,
         &config.frontend_base_url,
         &config.oauth_logout_url,
+        config.oauth_required_claim,
+        config.oauth_required_role,
     )
     .await?;
     let sessions =
@@ -409,6 +417,8 @@ mod tests {
             "client-secret",
             "--oauth-logout-url",
             "https://auth.example/application/o/scepa/end-session/",
+            "--oauth-required-role",
+            "SCEPA:EDITOR",
             "--session-secret",
             "test-session-secret",
         ]

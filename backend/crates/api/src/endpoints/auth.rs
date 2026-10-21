@@ -9,8 +9,8 @@ use axum::{
 };
 use openidconnect::{
     AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointMaybeSet, EndpointNotSet,
-    EndpointSet, IssuerUrl, Nonce, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
-    TokenResponse,
+    EndpointSet, IssuerUrl, Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier,
+    RedirectUrl, Scope, TokenResponse,
     core::{CoreAuthenticationFlow, CoreClient, CoreProviderMetadata},
     reqwest,
 };
@@ -36,6 +36,8 @@ pub struct AuthState {
     http: reqwest::Client,
     frontend_url: String,
     logout_url: String,
+    required_claim: String,
+    required_role: String,
 }
 
 impl AuthState {
@@ -46,7 +48,15 @@ impl AuthState {
         redirect_uri: &str,
         frontend_url: &str,
         logout_url: &str,
+        required_claim: String,
+        required_role: String,
     ) -> Result<Self, Box<dyn Error>> {
+        if required_claim.trim().is_empty() || required_role.trim().is_empty() {
+            return Err(io::Error::other(
+                "OAUTH_REQUIRED_CLAIM and OAUTH_REQUIRED_ROLE must not be empty",
+            )
+            .into());
+        }
         let http = reqwest::ClientBuilder::new()
             .redirect(reqwest::redirect::Policy::none())
             .build()?;
@@ -71,6 +81,8 @@ impl AuthState {
             http,
             frontend_url: frontend_url.to_owned(),
             logout_url: logout_url.to_owned(),
+            required_claim,
+            required_role,
         })
     }
 }
@@ -168,6 +180,36 @@ pub async fn callback(
     let claims = id_token
         .claims(&auth.client.id_token_verifier(), &Nonce::new(pending.nonce))
         .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    let user_info_url = auth.client.user_info_url().ok_or(StatusCode::BAD_GATEWAY)?;
+    let user_info_response = auth
+        .http
+        .get(user_info_url.as_str())
+        .bearer_auth(token.access_token().secret())
+        .send()
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?
+        .error_for_status()
+        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    let user_info: serde_json::Value = serde_json::from_slice(
+        &user_info_response
+            .bytes()
+            .await
+            .map_err(|_| StatusCode::BAD_GATEWAY)?,
+    )
+    .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    if let Some(reason) = role_denial_reason(
+        &user_info,
+        claims.subject().as_str(),
+        &auth.required_claim,
+        &auth.required_role,
+    ) {
+        tracing::warn!(reason, "OIDC role check rejected login");
+        session
+            .flush()
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        return Err(StatusCode::FORBIDDEN);
+    }
     session
         .cycle_id()
         .await
@@ -187,6 +229,24 @@ pub async fn callback(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Redirect::to(&auth.frontend_url))
+}
+
+fn role_denial_reason(
+    user_info: &serde_json::Value,
+    subject: &str,
+    claim: &str,
+    role: &str,
+) -> Option<&'static str> {
+    if user_info["sub"].as_str() != Some(subject) {
+        return Some("subject_mismatch");
+    }
+    let Some(values) = user_info[claim].as_array() else {
+        return Some("claim_missing_or_not_array");
+    };
+    if !values.iter().any(|value| value.as_str() == Some(role)) {
+        return Some("required_role_absent");
+    }
+    None
 }
 
 pub async fn logout(
@@ -232,6 +292,36 @@ mod tests {
         routing::get,
     };
     use tower::ServiceExt;
+
+    #[test]
+    fn required_role_must_match_the_verified_user_and_exact_claim_value() {
+        let info = serde_json::json!({"sub": "operator", "roles": ["default", "SCEPA:EDITOR"]});
+        assert_eq!(
+            role_denial_reason(&info, "operator", "roles", "SCEPA:EDITOR"),
+            None
+        );
+        assert_eq!(
+            role_denial_reason(&info, "other", "roles", "SCEPA:EDITOR"),
+            Some("subject_mismatch")
+        );
+        assert_eq!(
+            role_denial_reason(&info, "operator", "roles", "SCEPA"),
+            Some("required_role_absent")
+        );
+        assert_eq!(
+            role_denial_reason(&info, "operator", "groups", "SCEPA:EDITOR"),
+            Some("claim_missing_or_not_array")
+        );
+        assert_eq!(
+            role_denial_reason(
+                &serde_json::json!({"sub": "operator"}),
+                "operator",
+                "roles",
+                "SCEPA:EDITOR"
+            ),
+            Some("claim_missing_or_not_array")
+        );
+    }
 
     #[tokio::test]
     async fn document_routes_require_a_valid_session_and_logout_revokes_it() {

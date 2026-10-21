@@ -151,6 +151,17 @@ SCEPA handles Authentik login itself. Set `OAUTH_CLIENT_ID`,
 with Authentik and set `OAUTH_REDIRECT_URI` to that exact URL. For this HTTPS
 deployment, use
 `https://scepakp.mads-han.src.surf-hosted.nl/upload/api/auth/callback`.
+Set `OAUTH_REQUIRED_ROLE=SCEPA:EDITOR`. SCEPA requires that exact value in
+the `roles` claim of the OIDC UserInfo response during login and returns HTTP
+403 without creating a session if it is absent. Authentik roles are not sent
+by the default `profile` scope mapping. In Authentik, copy the expression from
+the default OpenID `profile` scope mapping into a new SCEPA `profile` scope
+mapping, add `"roles": [role.name for role in request.user.all_roles()],`
+inside its returned dictionary, and select the new mapping on SCEPA's OAuth
+provider in place of the default `profile` mapping. The expression must
+explicitly `return` the dictionary; a bare dictionary literal does not emit
+claims. Keep the `openid` and `email` mappings selected. `all_roles()` includes
+roles assigned directly and inherited through groups.
 Set `FRONTEND_BASE_URL` to
 `https://scepakp.mads-han.src.surf-hosted.nl/upload/`. These are the same
 variable names used by Studio, but SCEPA needs its own Authentik OAuth
