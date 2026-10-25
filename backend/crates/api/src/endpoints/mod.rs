@@ -1,5 +1,6 @@
 //! Public Axum API for document ingestion and review.
 
+pub mod auth;
 mod documents;
 mod drafts;
 mod pdfs;
@@ -131,8 +132,8 @@ struct RepairDocumentRequest {
 struct ApiDoc;
 
 /// Builds the document-upload HTTP router.
-pub fn router(state: AppState) -> Router {
-    Router::new()
+pub fn router(state: AppState, auth: auth::AuthState) -> Router {
+    let protected = Router::new()
         .merge(SwaggerUi::new("/swagger-ui").url("/openapi.json", openapi()))
         .route("/pdfs", post(pdfs::upload_pdf::upload_pdf))
         .route("/pdfs/{pdf_hash}", get(pdfs::download_pdf::download_pdf))
@@ -159,11 +160,23 @@ pub fn router(state: AppState) -> Router {
             get(documents::get_published_document::get_published_document)
                 .put(documents::update_document::update_document),
         )
+        .route_layer(middleware::from_fn(auth::require_user))
+        .with_state(state);
+
+    let auth_routes = Router::new()
+        .route("/auth/login", get(auth::login))
+        .route("/auth/callback", get(auth::callback))
+        .route("/auth/logout", get(auth::logout))
+        .route("/me", get(auth::me))
+        .with_state(auth);
+
+    Router::new()
+        .merge(auth_routes)
+        .merge(protected)
         .layer(DefaultBodyLimit::max(MAX_PDF_BYTES))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .layer(middleware::from_fn(normalize_error_response))
-        .with_state(state)
 }
 
 /// Generates the OpenAPI 3.1 document for the public HTTP API.
