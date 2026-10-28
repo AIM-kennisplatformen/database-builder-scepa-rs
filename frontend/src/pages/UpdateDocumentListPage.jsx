@@ -16,6 +16,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { toast, ToastContainer } from "react-toastify";
 import SearchBox from "../components/SearchBox";
 import DocumentStatusSortMenu from "../components/DocumentStatusSortMenu";
+import { apiUrl } from "../utils/api";
 
 export default function UpdateDocumentList({}) {
   const [documents, setDocuments] = useState(null);
@@ -102,8 +103,10 @@ export default function UpdateDocumentList({}) {
 
   async function loadDocuments() {
     try {
-      const normal = await fetchDocument("/api/documents");
-      const failed = await fetchDocument("/api/documents/requiring-fixing");
+      const normal = await fetchDocument(apiUrl("/documents"));
+      const failed = await fetchDocument(
+        apiUrl("/documents/requiring-fixing"),
+      );
 
       setDocuments([
         ...failed.map((doc) => ({ ...doc, requiresFixing: true })),
@@ -165,7 +168,7 @@ export default function UpdateDocumentList({}) {
   return (
     <div className="flex flex-col w-full max-w-7xl mx-auto justify-center">
       <div className="flex justify-end my-3">
-        <NavLink to={"/upload"}>
+        <NavLink to={"/"}>
           <button className="ps-3! flex flex-row gap-2">
             <Upload className="size-5" />
             Upload a document

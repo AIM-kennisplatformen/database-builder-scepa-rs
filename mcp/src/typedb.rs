@@ -88,10 +88,10 @@ impl MetadataStore {
             documents.insert(
                 hash.clone(),
                 DocumentMetadata {
-                    pdf_hash: hash,
                     document_id: row_string(&row, "document_id")?,
                     document_type: row_label(&row, "document_type")?,
                     title: row_string(&row, "title")?,
+                    description: None,
                     ieee_reference: String::new(),
                     doi: None,
                     isbn: Vec::new(),
@@ -103,6 +103,7 @@ impl MetadataStore {
                 },
             );
         }
+        self.add_descriptions(pdf_hashes, &mut documents).await?;
         self.add_identifiers(pdf_hashes, &mut documents).await?;
         let parties = self.parties(pdf_hashes).await?;
         for ((hash, _), party) in &parties {
@@ -184,6 +185,23 @@ impl MetadataStore {
                         document.isbn.push(value);
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    async fn add_descriptions(
+        &self,
+        hashes: &[String],
+        documents: &mut BTreeMap<String, DocumentMetadata>,
+    ) -> Result<(), SearchError> {
+        let query = "given $requested_hash: string; match $document isa document, \
+            has pdf_hash == $requested_hash, has description $description; \
+            select $requested_hash, $description;";
+        for row in self.metadata_rows(query, hashes).await? {
+            let hash = row_string(&row, "requested_hash")?;
+            if let Some(document) = documents.get_mut(&hash) {
+                document.description = Some(row_string(&row, "description")?);
             }
         }
         Ok(())
@@ -453,6 +471,14 @@ pub fn filter_query(filters: &LiteratureFilters) -> String {
                 .map(|kind| format!("$document isa! {}", kind.label())),
         ));
     }
+    if !filters.user_personas.is_empty() {
+        patterns.push(or_patterns(
+            filters
+                .user_personas
+                .iter()
+                .map(|persona| format!("$document has {} true", persona.label())),
+        ));
+    }
     if let Some(range) = &filters.publication_date {
         patterns.push(
             "$publication isa publication, links (work: $document), has publication_date $date"
@@ -570,6 +596,7 @@ mod tests {
     use super::*;
     use crate::models::{
         DocumentTypeFilter, OrganizationFilter, OrganizationTypeFilter, PublicationDateFilter,
+        UserPersonaFilter,
     };
 
     #[test]
@@ -579,7 +606,11 @@ mod tests {
                 from: Some(NaiveDate::from_ymd_opt(2020, 1, 1).unwrap()),
                 to: Some(NaiveDate::from_ymd_opt(2024, 12, 31).unwrap()),
             }),
-            document_types: vec![DocumentTypeFilter::ResearchPaper],
+            document_types: vec![DocumentTypeFilter::ProjectReport],
+            user_personas: vec![
+                UserPersonaFilter::StrategicOverview,
+                UserPersonaFilter::TargetGroups,
+            ],
             organization: Some(OrganizationFilter {
                 names: vec!["ACME\"; delete $x".into()],
                 roles: vec![OrganizationRoleFilter::Affiliation],
@@ -587,9 +618,45 @@ mod tests {
             }),
         };
         let query = filter_query(&filters);
-        assert!(query.contains("isa! research_paper"));
+        assert!(query.contains("isa! project_report"));
+        assert!(query.contains("has strategic_overview true"));
+        assert!(query.contains("has target_groups true"));
         assert!(query.contains("isa institution"));
         assert!(query.contains("2025-01-01T00:00:00"));
         assert!(query.contains(r#"contains "ACME\"; delete $x""#));
+    }
+
+    #[test]
+    fn empty_classification_arrays_add_no_restriction() {
+        let query = filter_query(&LiteratureFilters::default());
+
+        assert!(!query.contains("strategic_overview"));
+        assert!(!query.contains("best_practices"));
+        assert!(!query.contains("target_groups"));
+        assert!(!query.contains("grey_literature"));
+        assert!(!query.contains("scientific_literature"));
+        assert!(!query.contains("project_report"));
+    }
+
+    #[test]
+    fn classification_categories_are_anded_and_values_are_ored() {
+        let filters = LiteratureFilters {
+            user_personas: vec![
+                UserPersonaFilter::StrategicOverview,
+                UserPersonaFilter::BestPractices,
+            ],
+            document_types: vec![
+                DocumentTypeFilter::GreyLiterature,
+                DocumentTypeFilter::ScientificLiterature,
+            ],
+            ..LiteratureFilters::default()
+        };
+
+        let query = filter_query(&filters);
+
+        assert!(query.contains("has strategic_overview true"));
+        assert!(query.contains("or { $document has best_practices true"));
+        assert!(query.contains("isa! grey_literature"));
+        assert!(query.contains("or { $document isa! scientific_literature"));
     }
 }

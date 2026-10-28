@@ -2,10 +2,11 @@ import { ChevronDown, GripVertical, Info, Loader2 } from "lucide-react";
 import AuthorDisplay from "../components/AuthorDisplay";
 import PdfViewer from "../components/PdfViewer";
 import { useState, useEffect, useRef } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import { TEXT_REGEX, isValidField } from "../utils/validation";
 import { Plus } from "lucide-react";
 import { AUTHOR_FIELDS } from "../components/AuthorDisplay";
+import { apiUrl } from "../utils/api";
 
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -71,6 +72,18 @@ const BIBLIOGRAPHY_FIELDS = [
     placeholder: "Publisher",
     tooltip: "Test tooltip",
   },
+];
+
+const USER_PERSONAS = [
+  { value: "strategic_overview", label: "Strategic overview" },
+  { value: "best_practices", label: "Best practices" },
+  { value: "target_groups", label: "Target groups" },
+];
+
+const LITERATURE_KINDS = [
+  { value: "grey_literature", label: "Grey literature" },
+  { value: "scientific_literature", label: "Scientific literature" },
+  { value: "project_report", label: "Project report" },
 ];
 
 function isEmptyValue(value) {
@@ -275,6 +288,7 @@ function sanitizeContributor(author) {
 
 export default function UpdateDocumentPage({}) {
   const { pdf_hash } = useParams();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const requiresFixing = searchParams.get("requiresFixing") === "true";
   const [documentData, setDocumentData] = useState(null);
@@ -298,7 +312,20 @@ export default function UpdateDocumentPage({}) {
   const [contributorsFieldsData, setContributorsFieldsData] = useState([
     createBlankContributor(),
   ]);
+  const [classificationData, setClassificationData] = useState({
+    user_personas: [],
+    literature_kind: null,
+  });
+  const [description, setDescription] = useState("");
   const pendingSaveRef = useRef(null);
+
+  useEffect(() => {
+    if (location.state?.duplicateUpload) {
+      toast.info("This PDF has already been uploaded. Opening the existing document.", {
+        toastId: "duplicate-pdf-upload",
+      });
+    }
+  }, [location.state]);
 
   const bibliography =
     documentData?.artifact?.grobid_extraction_data?.bibliography;
@@ -325,7 +352,7 @@ export default function UpdateDocumentPage({}) {
 
   // GET /documents/{pdf_hash} -> { artifact: <draft fields> }
   function loadNormalDocument() {
-    fetchJson(`/api/documents/${pdf_hash}`)
+    fetchJson(apiUrl(`/documents/${pdf_hash}`))
       .then((res) =>
         applyDocument({ artifact: res.artifact, pdfHash: pdf_hash }),
       )
@@ -334,7 +361,7 @@ export default function UpdateDocumentPage({}) {
 
   // GET /documents/requiring-fixing/{case_id} -> { case, draft: { pdf_hash, ...draft fields } }
   function loadFixingDocument() {
-    fetchJson(`/api/documents/requiring-fixing/${pdf_hash}`)
+    fetchJson(apiUrl(`/documents/requiring-fixing/${pdf_hash}`))
       .then((res) =>
         applyDocument({
           artifact: res.draft,
@@ -363,6 +390,13 @@ export default function UpdateDocumentPage({}) {
     }
 
     const bibliography = effectiveBibliography(document.artifact);
+    const manualData = document.artifact?.manual_data;
+    const classification = manualData?.classification;
+    setDescription(manualData?.description ?? "");
+    setClassificationData({
+      user_personas: classification?.user_personas ?? [],
+      literature_kind: classification?.literature_kind ?? null,
+    });
 
     if (bibliography) {
       setBibliographyFieldsData({
@@ -410,8 +444,8 @@ export default function UpdateDocumentPage({}) {
   // For fixing documents the route param is the case id.
   function saveDocument(manualDocument) {
     const url = requiresFixing
-      ? `/api/documents/requiring-fixing/${pdf_hash}`
-      : `/api/documents/${pdf_hash}`;
+      ? apiUrl(`/documents/requiring-fixing/${pdf_hash}`)
+      : apiUrl(`/documents/${pdf_hash}`);
     const body = JSON.stringify(
       requiresFixing
         ? { manual_data: manualDocument, enrich: false }
@@ -432,7 +466,12 @@ export default function UpdateDocumentPage({}) {
     });
   }
 
-  function onDocumentSave(bibliographyFieldsData, contributorsFieldsData) {
+  function onDocumentSave(
+    bibliographyFieldsData,
+    contributorsFieldsData,
+    classificationData,
+    description,
+  ) {
     //check if data arrays are empty
     const hasBibliographyData = Object.values(bibliographyFieldsData).some(
       (value) => !isEmptyValue(value),
@@ -526,7 +565,11 @@ export default function UpdateDocumentPage({}) {
 
     setIsSaving(true);
 
-    saveDocument({ bibliography })
+    saveDocument({
+      description: sanitizeText(description),
+      bibliography,
+      classification: classificationData,
+    })
       .then((response) => {
         //handle the errors like in the uploadPage
         if (!response.ok) {
@@ -566,7 +609,7 @@ export default function UpdateDocumentPage({}) {
         className="h-full overflow-y-auto"
         style={{ width: `${pdfWidthPercent}%` }}
       >
-        {pdfHash && <PdfViewer file={`/api/pdfs/${pdfHash}`} />}
+        {pdfHash && <PdfViewer file={apiUrl(`/pdfs/${pdfHash}`)} />}
       </div>
       <div
         role="separator"
@@ -616,6 +659,16 @@ export default function UpdateDocumentPage({}) {
         )}
         {bibliography && (
           <div className="flex flex-col gap-6">
+            <label className="flex flex-col gap-1 text-sm text-primary">
+              <span className="font-medium">Description</span>
+              <textarea
+                className="min-h-24 resize-y rounded border border-border px-2 py-1 text-black"
+                placeholder="Add context about this document"
+                value={description}
+                disabled={isSaving}
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </label>
             <div className="flex flex-col gap-4">
               <div
                 className="flex flex-row gap-1 cursor-pointer select-none"
@@ -773,13 +826,73 @@ export default function UpdateDocumentPage({}) {
                 </>
               )}
             </div>
+
+            <fieldset className="flex flex-col gap-3 rounded border border-border p-3">
+              <legend className="px-1 font-bold text-primary">
+                Classification
+              </legend>
+              <div className="flex flex-col gap-2">
+                <span className="text-sm font-medium text-primary">
+                  User personas
+                </span>
+                {USER_PERSONAS.map((persona) => (
+                  <label
+                    key={persona.value}
+                    className="flex items-center gap-2 text-sm text-black"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={classificationData.user_personas.includes(
+                        persona.value,
+                      )}
+                      onChange={(event) =>
+                        setClassificationData((previous) => ({
+                          ...previous,
+                          user_personas: event.target.checked
+                            ? [...previous.user_personas, persona.value]
+                            : previous.user_personas.filter(
+                                (value) => value !== persona.value,
+                              ),
+                        }))
+                      }
+                    />
+                    {persona.label}
+                  </label>
+                ))}
+              </div>
+              <label className="flex flex-col gap-1 text-sm text-primary">
+                <span className="font-medium">Literature kind</span>
+                <select
+                  value={classificationData.literature_kind ?? ""}
+                  onChange={(event) =>
+                    setClassificationData((previous) => ({
+                      ...previous,
+                      literature_kind: event.target.value || null,
+                    }))
+                  }
+                  className="rounded border border-border bg-white px-2 py-1 text-black"
+                >
+                  <option value="">Select a literature kind</option>
+                  {LITERATURE_KINDS.map((kind) => (
+                    <option key={kind.value} value={kind.value}>
+                      {kind.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </fieldset>
           </div>
         )}
         <button
           className="w-full flex items-center justify-center gap-2 rounded bg-primary py-2 text-white my-4"
           disabled={isSaving}
           onClick={() =>
-            onDocumentSave(bibliographyFieldsData, contributorsFieldsData)
+            onDocumentSave(
+              bibliographyFieldsData,
+              contributorsFieldsData,
+              classificationData,
+              description,
+            )
           }
         >
           {isSaving && <Loader2 className="size-4 animate-spin" />}
