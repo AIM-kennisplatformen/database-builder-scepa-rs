@@ -1,4 +1,4 @@
-import { ChevronDown, GripVertical, Info, Loader2 } from "lucide-react";
+import { ChevronDown, GripVertical, Info, Loader2, Check } from "lucide-react";
 import AuthorDisplay from "../components/AuthorDisplay";
 import PdfViewer from "../components/PdfViewer";
 import { useState, useEffect, useRef } from "react";
@@ -286,6 +286,46 @@ function sanitizeContributor(author) {
   };
 }
 
+// sanitizeContributor returns null for a row without a name, which would hide
+// edits to its other fields (e.g. a new author whose affiliation or role was
+// filled in first), so fall back to the row's own editable fields.
+function snapshotContributor(author) {
+  const sanitized = sanitizeContributor(author);
+  if (sanitized) return sanitized;
+  const { _key, isOpen, errors, ...fields } = author;
+  return { ...fields, role: fields.role ?? "author" };
+}
+
+// Serializes only the user-editable data, leaving out client-only UI state
+// (isOpen, errors) so expanding a contributor doesn't count as an edit.
+function createSnapshot(
+  bibliographyFieldsData,
+  contributorsFieldsData,
+  classificationData,
+  description,
+) {
+  // Blank, whitespace-only and missing values all serialize as null, the same
+  // way sanitizeText treats them on save. Otherwise a field that started as
+  // null and was typed into and cleared again ("") would look edited.
+  const normalize = (_key, value) => {
+    if (value === undefined) return null;
+    if (typeof value === "string") return sanitizeText(value);
+    return value;
+  };
+
+  return JSON.stringify(
+    {
+      bibliographyFieldsData,
+      // Same shape that is sent on save, so e.g. a null role and the
+      // select's displayed default "author" count as the same value.
+      contributors: contributorsFieldsData.map(snapshotContributor),
+      classificationData,
+      description,
+    },
+    normalize,
+  );
+}
+
 export default function UpdateDocumentPage({}) {
   const { pdf_hash } = useParams();
   const location = useLocation();
@@ -318,6 +358,17 @@ export default function UpdateDocumentPage({}) {
   });
   const [description, setDescription] = useState("");
   const pendingSaveRef = useRef(null);
+  // Snapshot of the data as it was last saved successfully. Null until the
+  // first save, so a freshly loaded document counts as unsaved.
+  const [savedSnapshot, setSavedSnapshot] = useState(null);
+  const isDataDirty =
+    savedSnapshot !==
+    createSnapshot(
+      bibliographyFieldsData,
+      contributorsFieldsData,
+      classificationData,
+      description,
+    );
 
   useEffect(() => {
     if (location.state?.duplicateUpload) {
@@ -563,6 +614,15 @@ export default function UpdateDocumentPage({}) {
       authors: sanitizedContributors,
     };
 
+    // Captured now, so edits made while the request is in flight still count
+    // as unsaved once it succeeds.
+    const snapshot = createSnapshot(
+      bibliographyFieldsData,
+      contributorsFieldsData,
+      classificationData,
+      description,
+    );
+
     setIsSaving(true);
 
     saveDocument({
@@ -582,6 +642,7 @@ export default function UpdateDocumentPage({}) {
         return response.json();
       })
       .then(() => {
+        setSavedSnapshot(snapshot);
         toast(<CustomSuccessToast />, {
           autoClose: 7000,
           progressClassName: "!bg-primary !bg-none",
@@ -590,7 +651,9 @@ export default function UpdateDocumentPage({}) {
       .catch((err) => {
         toast.error(err.message);
       })
-      .finally(() => setIsSaving(false));
+      .finally(() => {
+        setIsSaving(false);
+      });
   }
 
   function handleResizeMove(e) {
@@ -884,8 +947,8 @@ export default function UpdateDocumentPage({}) {
           </div>
         )}
         <button
-          className="w-full flex items-center justify-center gap-2 rounded bg-primary py-2 text-white my-4"
-          disabled={isSaving}
+          className={`w-full flex items-center justify-center gap-2 rounded ${isDataDirty ? "bg-primary text-white" : "bg-primary-foreground! text-primary! border-primary!"} py-2 my-4`}
+          disabled={isSaving || !isDataDirty}
           onClick={() =>
             onDocumentSave(
               bibliographyFieldsData,
@@ -896,7 +959,11 @@ export default function UpdateDocumentPage({}) {
           }
         >
           {isSaving && <Loader2 className="size-4 animate-spin" />}
-          {isSaving ? "Saving..." : "Save document"}
+          {isSaving ? "Saving..." : isDataDirty ? "Save document" : 
+            <div className="flex flex-row gap-1 items-center">
+            <Check className="size-5" />
+            <p>Saved</p>
+            </div>}
         </button>
       </div>
       <ToastContainer />
