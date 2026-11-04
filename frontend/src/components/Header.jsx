@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { LibraryBig, LogIn } from "lucide-react";
+import { LibraryBig, LogOut } from "lucide-react";
 import { apiUrl } from "../utils/api.js";
 
 export default function Header() {
@@ -19,7 +19,7 @@ export default function Header() {
           </div>
         </div>
         <button onClick={() => window.location.assign(apiUrl("/auth/logout"))} className="flex flex-row gap-2 ps-3! bg-white! text-primary! hover:bg-gray-300! py-2!">
-          <LogIn />
+          <LogOut />
           Logout
         </button>
       </div>
