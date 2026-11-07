@@ -27,7 +27,8 @@ export default function UpdateDocumentList({}) {
   const [sortKey, setSortKey] = useState("title");
   const [isStatusMenuOpen, setIsStatusMenuOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState(null);
-  const [currentPage, setCurrentPage] = useState(2);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const pageSize = 7;
 
   const navigate = useNavigate();
@@ -44,6 +45,7 @@ export default function UpdateDocumentList({}) {
       onClick: () => {
         setSortKey("title");
         setAlphabeticSort(!alphabeticSort);
+        setCurrentPage(1);
       },
     },
     {
@@ -58,6 +60,7 @@ export default function UpdateDocumentList({}) {
       onClick: () => {
         setSortKey("published_at");
         setChronologicalSort(!chronologicalSort);
+        setCurrentPage(1);
       },
     },
     {
@@ -73,7 +76,10 @@ export default function UpdateDocumentList({}) {
       menu: isStatusMenuOpen ? (
         <DocumentStatusSortMenu
           selected={statusFilter}
-          onChange={setStatusFilter}
+          onChange={(value) => {
+            setStatusFilter(value);
+            setCurrentPage(1);
+          }}
           onClose={() => setIsStatusMenuOpen(false)}
         />
       ) : null,
@@ -81,8 +87,35 @@ export default function UpdateDocumentList({}) {
   ];
 
   useEffect(() => {
-    loadDocuments();
-  }, []);
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      search,
+      status:
+        statusFilter?.length === 1 ? statusFilter[0] : "all",
+      sort_by: sortKey,
+      descending: String(sortKey === "title" ? !alphabeticSort : !chronologicalSort),
+      page: String(currentPage),
+      page_size: String(pageSize),
+    });
+    async function loadDocuments() {
+      try {
+        const response = await fetch(apiUrl(`/documents/update-list?${params}`), {
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("Failed to load documents");
+        const result = await response.json();
+        setDocuments(result.documents);
+        setTotal(result.total);
+      } catch (err) {
+        if (err.name !== "AbortError") toast.error(err.message);
+      }
+    }
+    const timeout = setTimeout(loadDocuments, 300);
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [search, statusFilter, sortKey, alphabeticSort, chronologicalSort, currentPage]);
 
   function tableOnClickHandler(document) {
     // Fixing documents are addressed by review case id, normal ones by pdf_hash.
@@ -93,62 +126,7 @@ export default function UpdateDocumentList({}) {
     }
   }
 
-  async function fetchDocument(url) {
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`Failed to load documents`);
-    }
-    return res.json();
-  }
-
-  async function loadDocuments() {
-    try {
-      const normal = await fetchDocument(apiUrl("/documents"));
-      const failed = await fetchDocument(
-        apiUrl("/documents/requiring-fixing"),
-      );
-
-      setDocuments([
-        ...failed.map((doc) => ({ ...doc, requiresFixing: true })),
-        ...normal.map((doc) => ({ ...doc, requiresFixing: false })),
-      ]);
-    } catch (err) {
-      toast.error(err.message);
-    }
-  }
-
-  const visibleDocuments = (documents ?? [])
-    .filter((document) =>
-      (document.title ?? "").toLowerCase().includes(search.toLowerCase()),
-    )
-    .filter(
-      (document) =>
-        statusFilter === null ||
-        statusFilter.includes(
-          document.requiresFixing ? "requiresFixing" : "published",
-        ),
-    )
-    .sort((a, b) => {
-      // Documents with a missing value always sort last.
-      if (!a[sortKey] && !b[sortKey]) return 0;
-      if (!a[sortKey]) return 1;
-      if (!b[sortKey]) return -1;
-
-      if (sortKey === "title") {
-        const result = a.title.localeCompare(b.title);
-        return alphabeticSort ? result : -result;
-      }
-
-      const result = new Date(a.published_at) - new Date(b.published_at);
-      return chronologicalSort ? result : -result;
-    });
-
-  const totalPages = Math.ceil(visibleDocuments.length / pageSize);
-
-  const paginatedDocuments = visibleDocuments.slice(
-    (currentPage - 1) * pageSize,
-    currentPage * pageSize,
-  );
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   function toNextPage() {
     if (currentPage + 1 > totalPages) return;
@@ -159,11 +137,6 @@ export default function UpdateDocumentList({}) {
     if (currentPage - 1 < 1) return;
     setCurrentPage(currentPage - 1);
   }
-
-  useEffect(
-    () => setCurrentPage(1),
-    [search, statusFilter, sortKey, alphabeticSort, chronologicalSort],
-  );
 
   return (
     <div className="flex flex-col w-full max-w-7xl mx-auto justify-center">
@@ -187,30 +160,33 @@ export default function UpdateDocumentList({}) {
           All uploaded documents are shown here.
         </p>
 
-        {documents && documents.length > 0 && (
+        {documents && (
           <div className="mt-4 p-2 flex flex-row justify-between border-t">
-            <SearchBox setSearch={setSearch} />
+            <SearchBox setSearch={(value) => {
+              setSearch(value);
+              setCurrentPage(1);
+            }} />
             <p className="text-sm text-gray-600">
               Showing{" "}
               <span className="font-bold text-black">
-                {paginatedDocuments.length}
+                {documents.length}
               </span>{" "}
-              from the {documents.length} documents
+              from the {total} documents
             </p>
           </div>
         )}
 
         <div className="w-full h-96 overflow-auto scrollbar-custom">
-          {documents && documents.length > 0 && (
+          {documents && (
             <CustomTable
               headers={tableHeaders}
-              documents={paginatedDocuments}
+              documents={documents}
               onClickHandler={tableOnClickHandler}
             />
           )}
           {documents && documents.length === 0 && (
             <p className="text-lg text-primary justify-center flex">
-              No uploaded documents found
+              No documents found
             </p>
           )}
         </div>

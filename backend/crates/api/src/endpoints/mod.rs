@@ -138,6 +138,7 @@ impl<'de> Deserialize<'de> for ManualDocumentRequest {
         drafts::get_draft::get_draft,
         drafts::publish_draft::publish_draft,
         documents::list_documents::list_documents,
+        documents::list_update_documents::list_update_documents,
         review::list_documents_requiring_fixing::list_documents_requiring_fixing,
         review::get_document_requiring_fixing::get_document_requiring_fixing,
         review::fix_document::fix_document,
@@ -166,6 +167,10 @@ pub fn router(state: AppState) -> Router {
             get(drafts::get_draft::get_draft).put(drafts::publish_draft::publish_draft),
         )
         .route("/documents", get(documents::list_documents::list_documents))
+        .route(
+            "/documents/update-list",
+            get(documents::list_update_documents::list_update_documents),
+        )
         .route(
             "/documents/requiring-fixing",
             get(review::list_documents_requiring_fixing::list_documents_requiring_fixing),
@@ -344,6 +349,7 @@ mod tests {
             ("/drafts/{pdf_hash}", "get"),
             ("/drafts/{pdf_hash}", "put"),
             ("/documents", "get"),
+            ("/documents/update-list", "get"),
             ("/documents/requiring-fixing", "get"),
             ("/documents/requiring-fixing/{case_id}", "get"),
             ("/documents/requiring-fixing/{case_id}", "put"),

@@ -37,6 +37,25 @@ pub struct PublishedDocumentSummary {
     pub published_at: String,
 }
 
+/// One row in the update-document picker.
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct UpdateDocumentSummary {
+    pub id: Option<i64>,
+    pub pdf_hash: Option<String>,
+    pub title: Option<String>,
+    pub published_at: Option<String>,
+    #[serde(rename = "requiresFixing")]
+    pub requires_fixing: bool,
+}
+
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct UpdateDocumentPage {
+    pub documents: Vec<UpdateDocumentSummary>,
+    pub total: i64,
+    pub page: i64,
+    pub page_size: i64,
+}
+
 /// A durable, idempotent [`ReviewStore`] backed by PostgreSQL.
 ///
 /// An orchestrator can replay a successful database write before journaling
@@ -100,6 +119,91 @@ impl ReviewCaseDocumentSummary {
 }
 
 impl PostgresReviewStore {
+    /// Searches, sorts, and paginates the combined document picker in PostgreSQL.
+    pub async fn list_update_documents(
+        &self,
+        search: &str,
+        status: &str,
+        sort_by: &str,
+        ascending: bool,
+        page: i64,
+        page_size: i64,
+    ) -> eros::Result<UpdateDocumentPage> {
+        let offset = (page - 1) * page_size;
+        let rows = sqlx::query(
+            r#"
+            WITH documents AS (
+                SELECT NULL::bigint AS id, pdf_hash,
+                    COALESCE(published_artifact #>> '{manual_data,bibliography,title}',
+                             published_artifact #>> '{grobid_extraction_data,bibliography,title}') AS title,
+                    published_at, false AS requires_fixing
+                FROM document_artifacts
+                WHERE published_artifact IS NOT NULL
+                UNION ALL
+                SELECT review.id, review.pdf_hash,
+                    COALESCE(artifact.value #>> '{manual_data,bibliography,title}',
+                             artifact.value #>> '{grobid_extraction_data,bibliography,title}') AS title,
+                    document.published_at, true AS requires_fixing
+                FROM review_cases AS review
+                LEFT JOIN document_artifacts AS document ON document.pdf_hash = review.pdf_hash
+                CROSS JOIN LATERAL (SELECT COALESCE(document.draft_artifact, document.published_artifact) AS value) AS artifact
+                WHERE review.status = 'pending'
+            ), filtered AS (
+                SELECT * FROM documents
+                WHERE ($1 = '' OR strpos(lower(title), lower($1)) > 0)
+                  AND ($2 = 'all' OR ($2 = 'published' AND NOT requires_fixing)
+                       OR ($2 = 'requiresFixing' AND requires_fixing))
+            ), ranked AS (
+                SELECT *, row_number() OVER (ORDER BY
+                    CASE WHEN $3 = 'title' AND $4 THEN NULLIF(title, '') END ASC NULLS LAST,
+                    CASE WHEN $3 = 'title' AND NOT $4 THEN NULLIF(title, '') END DESC NULLS LAST,
+                    CASE WHEN $3 = 'published_at' AND $4 THEN published_at END ASC NULLS LAST,
+                    CASE WHEN $3 = 'published_at' AND NOT $4 THEN published_at END DESC NULLS LAST,
+                    requires_fixing DESC, pdf_hash ASC NULLS LAST, id ASC NULLS LAST
+                ) AS position FROM filtered
+            ), paged AS (
+                SELECT * FROM ranked ORDER BY position
+                LIMIT $5 OFFSET $6
+            )
+            SELECT paged.id, paged.pdf_hash, paged.title,
+                   paged.published_at::text AS published_at,
+                   paged.requires_fixing, total.count
+            FROM (SELECT count(*) AS count FROM filtered) AS total
+            LEFT JOIN paged ON true
+            ORDER BY paged.position
+            "#,
+        )
+        .bind(search)
+        .bind(status)
+        .bind(sort_by)
+        .bind(ascending)
+        .bind(page_size)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut documents = Vec::new();
+        let mut total = 0;
+        for row in rows {
+            total = row.try_get("count")?;
+            if let Some(requires_fixing) = row.try_get("requires_fixing")? {
+                documents.push(UpdateDocumentSummary {
+                    id: row.try_get("id")?,
+                    pdf_hash: row.try_get("pdf_hash")?,
+                    title: row.try_get("title")?,
+                    published_at: row.try_get("published_at")?,
+                    requires_fixing,
+                });
+            }
+        }
+        Ok(UpdateDocumentPage {
+            documents,
+            total,
+            page,
+            page_size,
+        })
+    }
+
     /// Connects to PostgreSQL using a lazily established connection pool.
     pub fn connect_lazy(database_url: &str) -> eros::Result<Self> {
         let pool = PgPoolOptions::new()
@@ -692,6 +796,26 @@ impl DocumentArtifactStore for PostgresReviewStore {
 mod tests {
     use super::*;
     use crate::models::draft::{Identifier, IdentifierKind, IdentifierScope};
+
+    #[test]
+    fn update_document_page_keeps_picker_field_names() {
+        let page = UpdateDocumentPage {
+            documents: vec![UpdateDocumentSummary {
+                id: Some(7),
+                pdf_hash: Some("hash".into()),
+                title: Some("Title".into()),
+                published_at: None,
+                requires_fixing: true,
+            }],
+            total: 1,
+            page: 1,
+            page_size: 7,
+        };
+        let json = serde_json::to_value(page).unwrap();
+        assert_eq!(json["documents"][0]["pdf_hash"], "hash");
+        assert_eq!(json["documents"][0]["requiresFixing"], true);
+        assert_eq!(json["total"], 1);
+    }
 
     fn review_case(pdf_hash: Option<String>) -> ReviewCase {
         ReviewCase {
