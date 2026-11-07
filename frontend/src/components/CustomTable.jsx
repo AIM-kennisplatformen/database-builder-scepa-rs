@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, ChevronsUpDown } from "lucide-react";
 
 export default function CustomTable({
   headers,
@@ -13,10 +13,25 @@ export default function CustomTable({
           <tr className="border-b border-border text-muted-foreground">
             {headers.map((header) => (
               <th
-                key={header}
-                className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide"
+                key={header.title}
+                className="relative px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide"
               >
-                {header}
+                <button
+                  className="-ml-3 flex flex-row gap-2 items-center px-3! py-2! bg-white! text-green-900! hover:bg-green-200!"
+                  onClick={header.onClick}
+                >
+                  {header.title}
+                  {header.isFilterable ? (
+                    <ChevronsUpDown className="size-4" />
+                  ) : (
+                    header.icon
+                  )}
+                </button>
+                {header.menu && (
+                  <div className="absolute left-0 top-full z-20 mt-1 normal-case tracking-normal">
+                    {header.menu}
+                  </div>
+                )}
               </th>
             ))}
           </tr>
