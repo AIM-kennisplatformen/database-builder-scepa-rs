@@ -3,6 +3,7 @@ import Header from "./components/Header";
 import UploadDocumentPage from "./pages/UploadDocumentPage";
 import UpdateDocumentListPage from "./pages/UpdateDocumentListPage";
 import UpdateDocumentPage from "./pages/UpdateDocumentPage";
+import NoAccessPage from "./pages/NoAccessPage";
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
             <Route path="/" element={<UploadDocumentPage />} />
             <Route path="/updatelist" element={<UpdateDocumentListPage />} />
             <Route path="/update/:pdf_hash" element={<UpdateDocumentPage />} />
+            <Route path="/no-access" element={<NoAccessPage />} />
           </Routes>
         </div>
       </div>
