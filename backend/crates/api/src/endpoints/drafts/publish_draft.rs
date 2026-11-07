@@ -27,7 +27,7 @@ pub(crate) async fn publish_draft(
     State(state): State<AppState>,
     Path(pdf_hash): Path<String>,
     headers: HeaderMap,
-    Json(mut manual_data): Json<ManualDocument>,
+    Json(ManualDocumentRequest(mut manual_data)): Json<ManualDocumentRequest>,
 ) -> Result<Json<PublishResponse>, ApiError> {
     assign_request_ids(&pdf_hash, &headers, &mut manual_data)?;
     validate_manual_update(&state, &pdf_hash, &manual_data).await?;

@@ -101,12 +101,3 @@ pub(super) fn non_empty_text(element: &XmlElement) -> Option<String> {
     let text = element.text();
     (!text.is_empty()).then_some(text)
 }
-
-pub(super) fn extract_year(value: &str) -> Option<u16> {
-    value
-        .as_bytes()
-        .windows(4)
-        .filter_map(|digits| std::str::from_utf8(digits).ok())
-        .filter_map(|digits| digits.parse::<u16>().ok())
-        .find(|year| (1900..=2099).contains(year))
-}

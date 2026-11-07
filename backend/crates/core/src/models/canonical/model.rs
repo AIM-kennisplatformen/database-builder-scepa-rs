@@ -504,11 +504,7 @@ fn publication_datetime(draft: &TeiDocument) -> Option<NaiveDateTime> {
             return NaiveDate::from_ymd_opt(year, 1, 1).and_then(|date| date.and_hms_opt(0, 0, 0));
         }
     }
-    draft
-        .bibliography
-        .publication_year
-        .and_then(|year| NaiveDate::from_ymd_opt(i32::from(year), 1, 1))
-        .and_then(|date| date.and_hms_opt(0, 0, 0))
+    None
 }
 
 #[cfg(test)]
@@ -519,6 +515,16 @@ mod tests {
         relations::{affiliation::TAffiliation, contribution::TContribution},
     };
     use crate::models::draft::{Bibliography, Contributor, IdentifierScope, PassageLevel};
+    use chrono::Datelike;
+
+    #[test]
+    fn publication_year_comes_from_publication_date() {
+        let mut source = draft(Some("A paper"), vec![]);
+        for (date, expected_year) in [("2024-05-06", 2024), ("2024-05", 2024), ("2024", 2024)] {
+            source.bibliography.publication_date = Some(date.into());
+            assert_eq!(publication_datetime(&source).unwrap().year(), expected_year);
+        }
+    }
 
     fn draft(title: Option<&str>, identifiers: Vec<Identifier>) -> TeiDocument {
         TeiDocument {

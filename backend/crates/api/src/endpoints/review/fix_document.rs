@@ -30,13 +30,13 @@ pub(crate) async fn fix_document(
     Json(mut request): Json<RepairDocumentRequest>,
 ) -> Result<Json<PublishResponse>, ApiError> {
     let repair = load_repair(&state.drafts, case_id).await?;
-    assign_request_ids(&repair.pdf_hash, &headers, &mut request.manual_data)?;
-    validate_artifact_update(repair.draft, &request.manual_data)?;
+    assign_request_ids(&repair.pdf_hash, &headers, &mut request.manual_data.0)?;
+    validate_artifact_update(repair.draft, &request.manual_data.0)?;
     let result = match state
         .restate
         .fix_document(FixDocumentWorkflowRequest {
             case_id,
-            manual_data: request.manual_data,
+            manual_data: request.manual_data.0,
             enrich: request.enrich,
         })
         .await

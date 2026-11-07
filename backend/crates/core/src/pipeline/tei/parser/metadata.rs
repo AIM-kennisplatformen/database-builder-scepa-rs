@@ -4,10 +4,11 @@ use crate::models::draft::{
     Bibliography, ContributorRole, DraftOrganization, DraftPublicationVenue, IdentifierKind,
     IdentifierScope, PassageLevel, TextPassage,
 };
+use chrono::NaiveDate;
 
 use super::{
     body::parse_text_passage,
-    common::{extract_year, non_empty_text, parse_contributor, parse_identifier},
+    common::{non_empty_text, parse_contributor, parse_identifier},
     xml::XmlElement,
 };
 
@@ -36,10 +37,11 @@ pub(super) fn parse_bibliography(header: &XmlElement, level: PassageLevel) -> Bi
         .find(|date| date.attr("type") == Some("published"))
         .and_then(|date| {
             date.attr("when")
+                .filter(|value| !value.trim().is_empty())
                 .map(str::to_owned)
                 .or_else(|| non_empty_text(date))
-        });
-    let publication_year = publication_date.as_deref().and_then(extract_year);
+        })
+        .and_then(|value| normalize_publication_date(&value));
 
     let publisher = header
         .descendants_named("publicationStmt")
@@ -81,12 +83,71 @@ pub(super) fn parse_bibliography(header: &XmlElement, level: PassageLevel) -> Bi
         authors,
         identifiers,
         publication_date,
-        publication_year,
         publisher,
         journal,
         journal_abbreviation,
         publication_event_id: None,
         abstract_text,
+    }
+}
+
+fn normalize_publication_date(value: &str) -> Option<String> {
+    let value = value.trim();
+    if let Some(date) = value.get(..10)
+        && matches!(value.as_bytes().get(10), Some(b'T' | b' '))
+        && let Ok(date) = NaiveDate::parse_from_str(date, "%Y-%m-%d")
+    {
+        return Some(date.to_string());
+    }
+    if let Ok(date) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+        return Some(date.to_string());
+    }
+    if let Ok(date) = NaiveDate::parse_from_str(&format!("{value}-01"), "%Y-%m-%d") {
+        return Some(date.to_string());
+    }
+    if let Ok(year) = value.parse::<i32>() {
+        return NaiveDate::from_ymd_opt(year, 1, 1).map(|date| date.to_string());
+    }
+    // Preserve an extractable year when the full TEI date is invalid.
+    let year = value
+        .as_bytes()
+        .windows(4)
+        .filter_map(|digits| std::str::from_utf8(digits).ok())
+        .filter_map(|digits| digits.parse::<i32>().ok())
+        .find(|year| (1900..=2099).contains(year))?;
+    NaiveDate::from_ymd_opt(year, 1, 1).map(|date| date.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_publication_date;
+
+    #[test]
+    fn fills_missing_publication_date_parts() {
+        assert_eq!(
+            normalize_publication_date("2024"),
+            Some("2024-01-01".into())
+        );
+        assert_eq!(
+            normalize_publication_date("2024-06"),
+            Some("2024-06-01".into())
+        );
+        assert_eq!(
+            normalize_publication_date("2024-06-15"),
+            Some("2024-06-15".into())
+        );
+        assert_eq!(
+            normalize_publication_date("Published in 2024"),
+            Some("2024-01-01".into())
+        );
+        assert_eq!(
+            normalize_publication_date("2024-13"),
+            Some("2024-01-01".into())
+        );
+        assert_eq!(
+            normalize_publication_date("2024-02-30"),
+            Some("2024-01-01".into())
+        );
     }
 }
 

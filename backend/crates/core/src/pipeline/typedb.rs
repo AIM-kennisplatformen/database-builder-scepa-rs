@@ -1027,7 +1027,6 @@ mod tests {
         draft.bibliography.publisher = Some("Example Press".into());
         draft.bibliography.journal = Some("Example Journal".into());
         draft.bibliography.publication_date = Some("2024-05-06".into());
-        draft.bibliography.publication_year = Some(2024);
         draft.bibliography.identifiers.push(Identifier {
             kind: IdentifierKind::Issn,
             value: "1234-5678".into(),

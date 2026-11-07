@@ -33,22 +33,6 @@ const BIBLIOGRAPHY_FIELDS = [
     tooltip: "Test tooltip",
   },
   {
-    key: "publication_date",
-    label: "Publication date",
-    type: "text",
-    regex: "^(\\d{4}-)?\\d{2}-\\d{2}$",
-    placeholder: "yyyy-mm-dd or mm-dd",
-    tooltip: "Test tooltip",
-  },
-  {
-    key: "publication_year",
-    label: "Publication year",
-    type: "text",
-    regex: "^\\d{4}$",
-    placeholder: " 2026",
-    tooltip: "Test tooltip",
-  },
-  {
     key: "journal",
     label: "Journal",
     type: "text",
@@ -143,7 +127,6 @@ function effectiveBibliography(artifact) {
   return {
     title: manual.title ?? extracted.title,
     publication_date: manual.publication_date ?? extracted.publication_date,
-    publication_year: manual.publication_year ?? extracted.publication_year,
     journal: manual.journal ?? extracted.journal,
     journal_abbreviation:
       manual.journal_abbreviation ?? extracted.journal_abbreviation,
@@ -162,15 +145,40 @@ function sanitizeText(value) {
   return trimmed === "" ? null : trimmed;
 }
 
+function splitPublicationDate(value) {
+  const match = /^([0-9]{4})(?:-([0-9]{2}))?(?:-([0-9]{2}))?$/.exec(value ?? "");
+  return {
+    year: match?.[1] ?? "",
+    month: match?.[2] ?? (match ? "01" : ""),
+    day: match?.[3] ?? (match ? "01" : ""),
+    invalidValue: value && !match ? value : null,
+  };
+}
+
+function publicationDateFromParts({ year, month, day }) {
+  if (!year.trim()) return null;
+  return `${year.trim()}-${(month.trim() || "01").padStart(2, "0")}-${(day.trim() || "01").padStart(2, "0")}`;
+}
+
+function isValidPublicationDateParts(parts) {
+  const { year, month, day } = parts;
+  if (parts.invalidValue) return false;
+  if (![year, month, day].some((part) => part.trim())) return true;
+  if (day && !month) return false;
+  if (!/^\d{4}$/.test(year) || (month && !/^\d{1,2}$/.test(month)) || (day && !/^\d{1,2}$/.test(day))) return false;
+  const date = publicationDateFromParts(parts);
+  const [y, m, d] = date.split("-").map(Number);
+  const parsed = new Date(Date.UTC(y, m - 1, d));
+  return parsed.getUTCFullYear() === y && parsed.getUTCMonth() === m - 1 && parsed.getUTCDate() === d;
+}
+
 function sanitizeBibliography(bibliographyFieldsData) {
-  const publicationYear = sanitizeText(bibliographyFieldsData.publication_year);
   const publisherName = sanitizeText(bibliographyFieldsData.publisher?.name);
   const journalName = sanitizeText(bibliographyFieldsData.journal?.name);
 
   return {
     title: sanitizeText(bibliographyFieldsData.title),
-    publication_date: sanitizeText(bibliographyFieldsData.publication_date),
-    publication_year: publicationYear ? Number(publicationYear) : null,
+    publication_date: publicationDateFromParts(bibliographyFieldsData.publication_date_parts),
     journal: journalName
       ? {
           id: bibliographyFieldsData.journal?.id || "",
@@ -340,8 +348,7 @@ export default function UpdateDocumentPage({}) {
   const [isAuthorsOpen, setIsAuthorsOpen] = useState(false);
   const [bibliographyFieldsData, setBibliographyFieldsData] = useState({
     title: null,
-    publication_date: null,
-    publication_year: null,
+    publication_date_parts: { year: "", month: "", day: "" },
     journal: null,
     journal_abbreviation: null,
     publisher: null,
@@ -452,8 +459,7 @@ export default function UpdateDocumentPage({}) {
     if (bibliography) {
       setBibliographyFieldsData({
         title: bibliography.title,
-        publication_date: bibliography.publication_date,
-        publication_year: bibliography.publication_year,
+        publication_date_parts: splitPublicationDate(bibliography.publication_date),
         journal: bibliography.journal,
         journal_abbreviation: bibliography.journal_abbreviation,
         publisher: bibliography.publisher,
@@ -524,8 +530,11 @@ export default function UpdateDocumentPage({}) {
     description,
   ) {
     //check if data arrays are empty
-    const hasBibliographyData = Object.values(bibliographyFieldsData).some(
-      (value) => !isEmptyValue(value),
+    const hasBibliographyData = Object.entries(bibliographyFieldsData).some(
+      ([key, value]) =>
+        key === "publication_date_parts"
+          ? Object.values(value).some((part) => !isEmptyValue(part))
+          : !isEmptyValue(value),
     );
     // _key is a client-only React list key (always present, even on a blank
     // row), so it's excluded here to keep this an actual "did the user type
@@ -552,7 +561,7 @@ export default function UpdateDocumentPage({}) {
     }
 
     //validate the data from both the data arrays
-    const bibliographyInvalid = BIBLIOGRAPHY_FIELDS.some(
+    const bibliographyInvalid = !isValidPublicationDateParts(bibliographyFieldsData.publication_date_parts) || BIBLIOGRAPHY_FIELDS.some(
       (field) =>
         !isValidField(
           bibliographyFieldDisplayValue(field, bibliographyFieldsData),
@@ -744,8 +753,56 @@ export default function UpdateDocumentPage({}) {
                 />
                 <h3 className="text-primary font-bold">Bibliography Fields</h3>
               </div>
-              {isBibliographyOpen &&
-                BIBLIOGRAPHY_FIELDS.map((field) => (
+              {isBibliographyOpen && (
+                <>
+                  <fieldset className="flex flex-col gap-1 text-sm text-primary">
+                    <legend className="font-medium">Publication date</legend>
+                    <div className="flex gap-2">
+                      {[
+                        { key: "year", label: "Year", placeholder: "YYYY", maxLength: 4 },
+                        { key: "month", label: "Month", placeholder: "MM", maxLength: 2 },
+                        { key: "day", label: "Day", placeholder: "DD", maxLength: 2 },
+                      ].map(({ key, label, placeholder, maxLength }) => (
+                        <label key={key} className="flex min-w-0 flex-1 flex-col gap-1">
+                          <span>{label}</span>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={maxLength}
+                            value={bibliographyFieldsData.publication_date_parts[key]}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              if (!/^\d*$/.test(value)) return;
+                              setBibliographyFieldsData((prev) => ({
+                                ...prev,
+                                publication_date_parts: {
+                                  ...prev.publication_date_parts,
+                                  [key]: value,
+                                  invalidValue: null,
+                                },
+                              }));
+                            }}
+                            aria-label={`Publication ${label.toLowerCase()}`}
+                            aria-invalid={!isValidPublicationDateParts(bibliographyFieldsData.publication_date_parts) || undefined}
+                            className={`w-full rounded border px-2 py-1 text-black ${
+                              isValidPublicationDateParts(bibliographyFieldsData.publication_date_parts)
+                                ? "border-border"
+                                : "border-red-500"
+                            }`}
+                            placeholder={placeholder}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    {!isValidPublicationDateParts(bibliographyFieldsData.publication_date_parts) && (
+                      <span className="text-xs text-red-500">
+                        {bibliographyFieldsData.publication_date_parts.invalidValue
+                          ? `Unsupported publication date: ${bibliographyFieldsData.publication_date_parts.invalidValue}. Enter a valid date.`
+                          : "Enter a valid publication date."}
+                      </span>
+                    )}
+                  </fieldset>
+                  {BIBLIOGRAPHY_FIELDS.map((field) => (
                   <div key={field.key}>
                     <label className="flex flex-col gap-1 text-sm text-primary">
                       <span className="font-medium flex flex-row gap-2">
@@ -810,7 +867,9 @@ export default function UpdateDocumentPage({}) {
                       )}
                     </label>
                   </div>
-                ))}
+                  ))}
+                </>
+              )}
             </div>
 
             <div className="flex flex-col gap-2">

@@ -27,7 +27,7 @@ pub(crate) async fn update_document(
     State(state): State<AppState>,
     Path(pdf_hash): Path<String>,
     headers: HeaderMap,
-    Json(mut manual_data): Json<ManualDocument>,
+    Json(ManualDocumentRequest(mut manual_data)): Json<ManualDocumentRequest>,
 ) -> Result<Json<UpdateDocumentWorkflowResponse>, ApiError> {
     assign_request_ids(&pdf_hash, &headers, &mut manual_data)?;
     validate_manual_update(&state, &pdf_hash, &manual_data).await?;
