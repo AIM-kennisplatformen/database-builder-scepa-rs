@@ -169,7 +169,10 @@ function isValidPublicationDateParts(parts) {
   const date = publicationDateFromParts(parts);
   const [y, m, d] = date.split("-").map(Number);
   const parsed = new Date(Date.UTC(y, m - 1, d));
-  return parsed.getUTCFullYear() === y && parsed.getUTCMonth() === m - 1 && parsed.getUTCDate() === d;
+  if (parsed.getUTCFullYear() !== y || parsed.getUTCMonth() !== m - 1 || parsed.getUTCDate() !== d) return false;
+  const now = new Date();
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return parsed.getTime() <= today;
 }
 
 function sanitizeBibliography(bibliographyFieldsData) {
