@@ -97,7 +97,10 @@ mod tests {
         assert_eq!(document.level, PassageLevel::Paragraph);
         assert_eq!(document.bibliography.title.as_deref(), Some("Typed TEI"));
         assert_eq!(document.bibliography.authors[0].name, "Ada Lovelace");
-        assert_eq!(document.bibliography.publication_year, Some(2024));
+        assert_eq!(
+            document.bibliography.publication_date.as_deref(),
+            Some("2024-05-06")
+        );
         assert_eq!(document.body_text.len(), 2);
 
         let Passage::Text(passage) = &document.body_text[0] else {
@@ -112,6 +115,20 @@ mod tests {
             panic!()
         };
         assert_eq!(table.content.as_ref().unwrap().rows, vec![vec!["A", "B"]]);
+    }
+
+    #[test]
+    fn fills_missing_parts_of_extracted_publication_dates() {
+        for (source, expected) in [("2024", "2024-01-01"), ("2024-06", "2024-06-01")] {
+            let xml = format!(
+                "<TEI><teiHeader><date type=\"published\" when=\"{source}\"/></teiHeader></TEI>"
+            );
+            let document = convert_tei(&xml).unwrap();
+            assert_eq!(
+                document.bibliography.publication_date.as_deref(),
+                Some(expected)
+            );
+        }
     }
 
     #[test]

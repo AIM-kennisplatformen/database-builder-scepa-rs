@@ -36,7 +36,7 @@ use scepa::{
         },
     },
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
@@ -97,11 +97,32 @@ struct RepairDraftResponse {
     missing_fields: Vec<CanonicalMissingField>,
 }
 
-#[derive(Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, ToSchema)]
 struct RepairDocumentRequest {
-    manual_data: ManualDocument,
+    #[schema(value_type = ManualDocument)]
+    manual_data: ManualDocumentRequest,
     #[serde(default)]
     enrich: bool,
+}
+
+#[derive(Debug)]
+struct ManualDocumentRequest(ManualDocument);
+
+impl<'de> Deserialize<'de> for ManualDocumentRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.pointer("/bibliography/publication_year").is_some() {
+            return Err(de::Error::custom(
+                "bibliography.publication_year is not accepted; use publication_date",
+            ));
+        }
+        serde_json::from_value(value)
+            .map(Self)
+            .map_err(de::Error::custom)
+    }
 }
 
 #[derive(OpenApi)]
@@ -117,6 +138,7 @@ struct RepairDocumentRequest {
         drafts::get_draft::get_draft,
         drafts::publish_draft::publish_draft,
         documents::list_documents::list_documents,
+        documents::list_update_documents::list_update_documents,
         review::list_documents_requiring_fixing::list_documents_requiring_fixing,
         review::get_document_requiring_fixing::get_document_requiring_fixing,
         review::fix_document::fix_document,
@@ -145,6 +167,10 @@ pub fn router(state: AppState) -> Router {
             get(drafts::get_draft::get_draft).put(drafts::publish_draft::publish_draft),
         )
         .route("/documents", get(documents::list_documents::list_documents))
+        .route(
+            "/documents/update-list",
+            get(documents::list_update_documents::list_update_documents),
+        )
         .route(
             "/documents/requiring-fixing",
             get(review::list_documents_requiring_fixing::list_documents_requiring_fixing),
@@ -280,6 +306,32 @@ async fn load_repair(drafts: &PostgresReviewStore, case_id: i64) -> Result<Repai
 mod tests {
     use super::*;
     use serde_json::{Value, json};
+
+    #[test]
+    fn document_requests_accept_publication_date_and_reject_publication_year() {
+        let accepted = json!({"bibliography": {"publication_date": "2024-05-06"}});
+        assert_eq!(
+            serde_json::from_value::<ManualDocumentRequest>(accepted.clone())
+                .unwrap()
+                .0
+                .bibliography
+                .publication_date
+                .as_deref(),
+            Some("2024-05-06")
+        );
+        assert!(
+            serde_json::from_value::<RepairDocumentRequest>(json!({"manual_data": accepted}))
+                .is_ok()
+        );
+
+        let deprecated = json!({"bibliography": {"publication_year": 2024}});
+        assert!(serde_json::from_value::<ManualDocumentRequest>(deprecated.clone()).is_err());
+        assert!(
+            serde_json::from_value::<RepairDocumentRequest>(json!({"manual_data": deprecated}))
+                .is_err()
+        );
+    }
+
     #[test]
     fn openapi_contains_every_public_operation() {
         let document = serde_json::to_value(openapi()).unwrap();
@@ -297,6 +349,7 @@ mod tests {
             ("/drafts/{pdf_hash}", "get"),
             ("/drafts/{pdf_hash}", "put"),
             ("/documents", "get"),
+            ("/documents/update-list", "get"),
             ("/documents/requiring-fixing", "get"),
             ("/documents/requiring-fixing/{case_id}", "get"),
             ("/documents/requiring-fixing/{case_id}", "put"),
@@ -316,6 +369,19 @@ mod tests {
     fn openapi_contains_structured_wire_schemas() {
         let document = serde_json::to_value(openapi()).unwrap();
         let schemas = document["components"]["schemas"].as_object().unwrap();
+
+        for name in ["Bibliography", "ManualBibliography"] {
+            assert!(
+                schemas[name]["properties"]
+                    .get("publication_date")
+                    .is_some()
+            );
+            assert!(
+                schemas[name]["properties"]
+                    .get("publication_year")
+                    .is_none()
+            );
+        }
 
         for (name, property) in [
             ("ManualDocument", "bibliography"),

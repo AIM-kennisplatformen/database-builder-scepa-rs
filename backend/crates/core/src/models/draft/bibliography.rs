@@ -12,7 +12,6 @@ pub struct Bibliography {
     pub authors: Vec<Contributor>,
     pub identifiers: Vec<Identifier>,
     pub publication_date: Option<String>,
-    pub publication_year: Option<u16>,
     pub publisher: Option<DraftOrganization>,
     pub journal: Option<DraftPublicationVenue>,
     pub journal_abbreviation: Option<String>,

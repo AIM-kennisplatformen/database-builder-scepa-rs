@@ -1,18 +1,132 @@
-import { SavePlus, Upload } from "lucide-react";
+import {
+  ArrowDownAZ,
+  ArrowUpZA,
+  CalendarArrowDown,
+  CalendarArrowUp,
+  ChevronLeft,
+  ChevronRight,
+  Funnel,
+  SavePlus,
+  Upload,
+  X,
+} from "lucide-react";
 import CustomTable from "../components/CustomTable";
-import react, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { toast, ToastContainer } from "react-toastify";
+import SearchBox from "../components/SearchBox";
+import DocumentStatusSortMenu from "../components/DocumentStatusSortMenu";
 import { apiUrl } from "../utils/api";
 
 export default function UpdateDocumentList({}) {
-  const tableHeaders = ["Title", "Published", "Status"];
   const [documents, setDocuments] = useState(null);
+  const [search, setSearch] = useState("");
+  const [alphabeticSort, setAlphabeticSort] = useState(true);
+  const [chronologicalSort, setChronologicalSort] = useState(false);
+  // The most recently clicked column decides what the table is sorted on.
+  const [sortKey, setSortKey] = useState("title");
+  const [isStatusMenuOpen, setIsStatusMenuOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const pageSize = 6;
+
   const navigate = useNavigate();
 
+  const tableHeaders = [
+    {
+      title: "Title",
+      isFilterable: sortKey !== "title",
+      icon: alphabeticSort ? (
+        <ArrowDownAZ className="size-4" />
+      ) : (
+        <ArrowUpZA className="size-4" />
+      ),
+      onClick: () => {
+        setSortKey("title");
+        setAlphabeticSort(!alphabeticSort);
+        setCurrentPage(1);
+      },
+    },
+    {
+      title: "Published",
+      // Show the neutral icon while another column is the active sort.
+      isFilterable: sortKey !== "published_at",
+      icon: chronologicalSort ? (
+        <CalendarArrowUp className="size-4" />
+      ) : (
+        <CalendarArrowDown className="size-4" />
+      ),
+      onClick: () => {
+        setSortKey("published_at");
+        setChronologicalSort(!chronologicalSort);
+        setCurrentPage(1);
+      },
+    },
+    {
+      title: "Status",
+      icon: isStatusMenuOpen ? (
+        <X className="size-4" />
+      ) : statusFilter == null ? (
+        <Funnel className="size-4" />
+      ) : (
+        <Funnel className="size-4 fill-current" />
+      ),
+      onClick: () => setIsStatusMenuOpen(!isStatusMenuOpen),
+      menu: isStatusMenuOpen ? (
+        <DocumentStatusSortMenu
+          selected={statusFilter}
+          onChange={(value) => {
+            setStatusFilter(value);
+            setCurrentPage(1);
+          }}
+          onClose={() => setIsStatusMenuOpen(false)}
+        />
+      ) : null,
+    },
+  ];
+
   useEffect(() => {
-    loadDocuments();
-  }, []);
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      search,
+      status: statusFilter?.length === 1 ? statusFilter[0] : "all",
+      sort_by: sortKey,
+      descending: String(
+        sortKey === "title" ? !alphabeticSort : !chronologicalSort,
+      ),
+      page: String(currentPage),
+      page_size: String(pageSize),
+    });
+    async function loadDocuments() {
+      try {
+        const response = await fetch(
+          apiUrl(`/documents/update-list?${params}`),
+          {
+            signal: controller.signal,
+          },
+        );
+        if (!response.ok) throw new Error("Failed to load documents");
+        const result = await response.json();
+        setDocuments(result.documents);
+        setTotal(result.total);
+      } catch (err) {
+        if (err.name !== "AbortError") toast.error(err.message);
+      }
+    }
+    const timeout = setTimeout(loadDocuments, 300);
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [
+    search,
+    statusFilter,
+    sortKey,
+    alphabeticSort,
+    chronologicalSort,
+    currentPage,
+  ]);
 
   function tableOnClickHandler(document) {
     // Fixing documents are addressed by review case id, normal ones by pdf_hash.
@@ -23,32 +137,20 @@ export default function UpdateDocumentList({}) {
     }
   }
 
-  async function fetchDocument(url) {
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`Failed to load documents`);
-    }
-    return res.json();
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  function toNextPage() {
+    if (currentPage + 1 > totalPages) return;
+    setCurrentPage(currentPage + 1);
   }
 
-  async function loadDocuments() {
-    try {
-      const normal = await fetchDocument(apiUrl("/documents"));
-      const failed = await fetchDocument(
-        apiUrl("/documents/requiring-fixing"),
-      );
-
-      setDocuments([
-        ...failed.map((doc) => ({ ...doc, requiresFixing: true })),
-        ...normal.map((doc) => ({ ...doc, requiresFixing: false })),
-      ]);
-    } catch (err) {
-      toast.error(err.message);
-    }
+  function toPrevPage() {
+    if (currentPage - 1 < 1) return;
+    setCurrentPage(currentPage - 1);
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col w-full max-w-7xl mx-auto justify-center">
       <div className="flex justify-end my-3">
         <NavLink to={"/"}>
           <button className="ps-3! flex flex-row gap-2">
@@ -57,7 +159,7 @@ export default function UpdateDocumentList({}) {
           </button>
         </NavLink>
       </div>
-      <div className="rounded-lg bg-white p-8 shadow-md text-primary flex-col max-w-7xl items-center max-h-full overflow-hidden">
+      <div className="rounded-lg bg-white p-8 shadow-md text-primary flex-col max-h-full overflow-hidden">
         <div className="flex flex-row gap-1.5 mb-2 justify-center ">
           <SavePlus className="size-4" />
           <h2 className="text-xs font-semibold">Update documents</h2>
@@ -68,8 +170,25 @@ export default function UpdateDocumentList({}) {
         <p className="text-xs text-muted-foreground italic mt-2 text-center">
           All uploaded documents are shown here.
         </p>
-        <div className="mt-4 w-full flex-1 min-h-0 max-h-96 overflow-auto scrollbar-custom">
-          {documents && documents.length > 0 && (
+
+        {documents && (
+          <div className="mt-4 p-2 flex flex-row justify-between border-t">
+            <SearchBox
+              setSearch={(value) => {
+                setSearch(value);
+                setCurrentPage(1);
+              }}
+            />
+            <p className="text-sm text-gray-600">
+              Showing{" "}
+              <span className="font-bold text-black">{documents.length}</span>{" "}
+              from the {total} documents
+            </p>
+          </div>
+        )}
+
+        <div className="w-full h-96 overflow-auto scrollbar-custom">
+          {documents && (
             <CustomTable
               headers={tableHeaders}
               documents={documents}
@@ -78,9 +197,29 @@ export default function UpdateDocumentList({}) {
           )}
           {documents && documents.length === 0 && (
             <p className="text-lg text-primary justify-center flex">
-              No uploaded documents found
+              No documents found
             </p>
           )}
+        </div>
+        <div className="flex justify-center gap-3 rounded-xl px-3 py-1 mx-auto items-center">
+          <button
+            className="p-1! text-xs!"
+            onClick={() => toPrevPage()}
+            disabled={currentPage - 1 < 1}
+          >
+            <ChevronLeft />
+          </button>
+          <p className="text-sm underline">
+            <span className="font-bold">{currentPage}</span>
+            {""} of {totalPages}
+          </p>
+          <button
+            className="p-1! text-xs!"
+            onClick={() => toNextPage()}
+            disabled={currentPage + 1 > totalPages}
+          >
+            <ChevronRight />
+          </button>
         </div>
         <ToastContainer />
       </div>

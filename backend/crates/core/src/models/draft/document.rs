@@ -154,9 +154,6 @@ impl DraftDocument {
         if let Some(value) = &manual.publication_date {
             effective.bibliography.publication_date = Some(value.clone());
         }
-        if let Some(value) = manual.publication_year {
-            effective.bibliography.publication_year = Some(value);
-        }
         if let Some(value) = &manual.publisher {
             effective.bibliography.publisher = Some(value.clone());
         }
@@ -271,8 +268,7 @@ impl ManualDocument {
                 .journal
                 .as_ref()
                 .is_some_and(|value| value.id.is_empty())
-            || ((self.bibliography.publication_date.is_some()
-                || self.bibliography.publication_year.is_some())
+            || (self.bibliography.publication_date.is_some()
                 && self
                     .bibliography
                     .publication_event_id
@@ -331,8 +327,7 @@ impl ManualDocument {
         {
             journal.id = stable_id(&scope, "publication-venue", "journal");
         }
-        if (self.bibliography.publication_date.is_some()
-            || self.bibliography.publication_year.is_some())
+        if self.bibliography.publication_date.is_some()
             && self
                 .bibliography
                 .publication_event_id
@@ -410,7 +405,7 @@ fn assign_bibliography_ids(bibliography: &mut Bibliography, scope: &str, locator
     {
         journal.id = stable_id(scope, "publication-venue", &format!("{locator}:journal"));
     }
-    if (bibliography.publication_date.is_some() || bibliography.publication_year.is_some())
+    if bibliography.publication_date.is_some()
         && bibliography
             .publication_event_id
             .as_deref()
@@ -549,8 +544,6 @@ pub struct ManualBibliography {
     pub identifiers: Option<Vec<Identifier>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub publication_date: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub publication_year: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub publisher: Option<crate::models::draft::bibliography::DraftOrganization>,
     #[serde(skip_serializing_if = "Option::is_none")]
