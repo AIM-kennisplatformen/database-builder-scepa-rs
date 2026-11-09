@@ -29,7 +29,7 @@ export default function UpdateDocumentList({}) {
   const [statusFilter, setStatusFilter] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const pageSize = 7;
+  const pageSize = 6;
 
   const navigate = useNavigate();
 
@@ -90,18 +90,22 @@ export default function UpdateDocumentList({}) {
     const controller = new AbortController();
     const params = new URLSearchParams({
       search,
-      status:
-        statusFilter?.length === 1 ? statusFilter[0] : "all",
+      status: statusFilter?.length === 1 ? statusFilter[0] : "all",
       sort_by: sortKey,
-      descending: String(sortKey === "title" ? !alphabeticSort : !chronologicalSort),
+      descending: String(
+        sortKey === "title" ? !alphabeticSort : !chronologicalSort,
+      ),
       page: String(currentPage),
       page_size: String(pageSize),
     });
     async function loadDocuments() {
       try {
-        const response = await fetch(apiUrl(`/documents/update-list?${params}`), {
-          signal: controller.signal,
-        });
+        const response = await fetch(
+          apiUrl(`/documents/update-list?${params}`),
+          {
+            signal: controller.signal,
+          },
+        );
         if (!response.ok) throw new Error("Failed to load documents");
         const result = await response.json();
         setDocuments(result.documents);
@@ -115,7 +119,14 @@ export default function UpdateDocumentList({}) {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [search, statusFilter, sortKey, alphabeticSort, chronologicalSort, currentPage]);
+  }, [
+    search,
+    statusFilter,
+    sortKey,
+    alphabeticSort,
+    chronologicalSort,
+    currentPage,
+  ]);
 
   function tableOnClickHandler(document) {
     // Fixing documents are addressed by review case id, normal ones by pdf_hash.
@@ -162,15 +173,15 @@ export default function UpdateDocumentList({}) {
 
         {documents && (
           <div className="mt-4 p-2 flex flex-row justify-between border-t">
-            <SearchBox setSearch={(value) => {
-              setSearch(value);
-              setCurrentPage(1);
-            }} />
+            <SearchBox
+              setSearch={(value) => {
+                setSearch(value);
+                setCurrentPage(1);
+              }}
+            />
             <p className="text-sm text-gray-600">
               Showing{" "}
-              <span className="font-bold text-black">
-                {documents.length}
-              </span>{" "}
+              <span className="font-bold text-black">{documents.length}</span>{" "}
               from the {total} documents
             </p>
           </div>
