@@ -11,7 +11,6 @@ import { apiUrl } from "../utils/api";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import CustomSuccessToast from "../components/CustomSuccessToast";
-import { Tooltip } from "react-tooltip";
 
 /* Example object:
 {
@@ -19,7 +18,6 @@ import { Tooltip } from "react-tooltip";
     label: {Used to render the label above the input field},
     regex: {Used to validate the input},
     placeholder: {Used to display the placeholder inside the input},
-    tooltip: {Used to display a 'Information' icon and show a tooltip on hover -> if absent or null/empty it won't display the tooltip or icon}
   },
 */
 
@@ -30,7 +28,6 @@ const BIBLIOGRAPHY_FIELDS = [
     type: "text",
     regex: TEXT_REGEX,
     placeholder: "Energy poverty solotions",
-    tooltip: "Test tooltip",
   },
   {
     key: "journal",
@@ -38,7 +35,6 @@ const BIBLIOGRAPHY_FIELDS = [
     type: "text",
     regex: TEXT_REGEX,
     placeholder: "Journal",
-    tooltip: "Test tooltip",
   },
   {
     key: "journal_abbreviation",
@@ -46,7 +42,6 @@ const BIBLIOGRAPHY_FIELDS = [
     type: "text",
     regex: "^[A-Za-zÀ-ÖØ-öø-ÿ0-9\\s.&-]+$",
     placeholder: "Journal abbreviation",
-    tooltip: "Test tooltip",
   },
   {
     key: "publisher",
@@ -54,7 +49,6 @@ const BIBLIOGRAPHY_FIELDS = [
     type: "text",
     regex: TEXT_REGEX,
     placeholder: "Publisher",
-    tooltip: "Test tooltip",
   },
 ];
 
@@ -146,7 +140,9 @@ function sanitizeText(value) {
 }
 
 function splitPublicationDate(value) {
-  const match = /^([0-9]{4})(?:-([0-9]{2}))?(?:-([0-9]{2}))?$/.exec(value ?? "");
+  const match = /^([0-9]{4})(?:-([0-9]{2}))?(?:-([0-9]{2}))?$/.exec(
+    value ?? "",
+  );
   return {
     year: match?.[1] ?? "",
     month: match?.[2] ?? (match ? "01" : ""),
@@ -165,11 +161,21 @@ function isValidPublicationDateParts(parts) {
   if (parts.invalidValue) return false;
   if (![year, month, day].some((part) => part.trim())) return true;
   if (day && !month) return false;
-  if (!/^\d{4}$/.test(year) || (month && !/^\d{1,2}$/.test(month)) || (day && !/^\d{1,2}$/.test(day))) return false;
+  if (
+    !/^\d{4}$/.test(year) ||
+    (month && !/^\d{1,2}$/.test(month)) ||
+    (day && !/^\d{1,2}$/.test(day))
+  )
+    return false;
   const date = publicationDateFromParts(parts);
   const [y, m, d] = date.split("-").map(Number);
   const parsed = new Date(Date.UTC(y, m - 1, d));
-  if (parsed.getUTCFullYear() !== y || parsed.getUTCMonth() !== m - 1 || parsed.getUTCDate() !== d) return false;
+  if (
+    parsed.getUTCFullYear() !== y ||
+    parsed.getUTCMonth() !== m - 1 ||
+    parsed.getUTCDate() !== d
+  )
+    return false;
   const now = new Date();
   const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
   return parsed.getTime() <= today;
@@ -181,7 +187,9 @@ function sanitizeBibliography(bibliographyFieldsData) {
 
   return {
     title: sanitizeText(bibliographyFieldsData.title),
-    publication_date: publicationDateFromParts(bibliographyFieldsData.publication_date_parts),
+    publication_date: publicationDateFromParts(
+      bibliographyFieldsData.publication_date_parts,
+    ),
     journal: journalName
       ? {
           id: bibliographyFieldsData.journal?.id || "",
@@ -382,9 +390,12 @@ export default function UpdateDocumentPage({}) {
 
   useEffect(() => {
     if (location.state?.duplicateUpload) {
-      toast.info("This PDF has already been uploaded. Opening the existing document.", {
-        toastId: "duplicate-pdf-upload",
-      });
+      toast.info(
+        "This PDF has already been uploaded. Opening the existing document.",
+        {
+          toastId: "duplicate-pdf-upload",
+        },
+      );
     }
   }, [location.state]);
 
@@ -462,7 +473,9 @@ export default function UpdateDocumentPage({}) {
     if (bibliography) {
       setBibliographyFieldsData({
         title: bibliography.title,
-        publication_date_parts: splitPublicationDate(bibliography.publication_date),
+        publication_date_parts: splitPublicationDate(
+          bibliography.publication_date,
+        ),
         journal: bibliography.journal,
         journal_abbreviation: bibliography.journal_abbreviation,
         publisher: bibliography.publisher,
@@ -564,13 +577,17 @@ export default function UpdateDocumentPage({}) {
     }
 
     //validate the data from both the data arrays
-    const bibliographyInvalid = !isValidPublicationDateParts(bibliographyFieldsData.publication_date_parts) || BIBLIOGRAPHY_FIELDS.some(
-      (field) =>
-        !isValidField(
-          bibliographyFieldDisplayValue(field, bibliographyFieldsData),
-          field.regex,
-        ),
-    );
+    const bibliographyInvalid =
+      !isValidPublicationDateParts(
+        bibliographyFieldsData.publication_date_parts,
+      ) ||
+      BIBLIOGRAPHY_FIELDS.some(
+        (field) =>
+          !isValidField(
+            bibliographyFieldDisplayValue(field, bibliographyFieldsData),
+            field.regex,
+          ),
+      );
     const contributorsInvalid = contributorsFieldsData.some((author) =>
       AUTHOR_FIELDS.some(
         (field) =>
@@ -762,17 +779,37 @@ export default function UpdateDocumentPage({}) {
                     <legend className="font-medium">Publication date</legend>
                     <div className="flex gap-2">
                       {[
-                        { key: "year", label: "Year", placeholder: "YYYY", maxLength: 4 },
-                        { key: "month", label: "Month", placeholder: "MM", maxLength: 2 },
-                        { key: "day", label: "Day", placeholder: "DD", maxLength: 2 },
+                        {
+                          key: "year",
+                          label: "Year",
+                          placeholder: "YYYY",
+                          maxLength: 4,
+                        },
+                        {
+                          key: "month",
+                          label: "Month",
+                          placeholder: "MM",
+                          maxLength: 2,
+                        },
+                        {
+                          key: "day",
+                          label: "Day",
+                          placeholder: "DD",
+                          maxLength: 2,
+                        },
                       ].map(({ key, label, placeholder, maxLength }) => (
-                        <label key={key} className="flex min-w-0 flex-1 flex-col gap-1">
+                        <label
+                          key={key}
+                          className="flex min-w-0 flex-1 flex-col gap-1"
+                        >
                           <span>{label}</span>
                           <input
                             type="text"
                             inputMode="numeric"
                             maxLength={maxLength}
-                            value={bibliographyFieldsData.publication_date_parts[key]}
+                            value={
+                              bibliographyFieldsData.publication_date_parts[key]
+                            }
                             onChange={(event) => {
                               const value = event.target.value;
                               if (!/^\d*$/.test(value)) return;
@@ -786,9 +823,15 @@ export default function UpdateDocumentPage({}) {
                               }));
                             }}
                             aria-label={`Publication ${label.toLowerCase()}`}
-                            aria-invalid={!isValidPublicationDateParts(bibliographyFieldsData.publication_date_parts) || undefined}
+                            aria-invalid={
+                              !isValidPublicationDateParts(
+                                bibliographyFieldsData.publication_date_parts,
+                              ) || undefined
+                            }
                             className={`w-full rounded border px-2 py-1 text-black ${
-                              isValidPublicationDateParts(bibliographyFieldsData.publication_date_parts)
+                              isValidPublicationDateParts(
+                                bibliographyFieldsData.publication_date_parts,
+                              )
                                 ? "border-border"
                                 : "border-red-500"
                             }`}
@@ -797,79 +840,70 @@ export default function UpdateDocumentPage({}) {
                         </label>
                       ))}
                     </div>
-                    {!isValidPublicationDateParts(bibliographyFieldsData.publication_date_parts) && (
+                    {!isValidPublicationDateParts(
+                      bibliographyFieldsData.publication_date_parts,
+                    ) && (
                       <span className="text-xs text-red-500">
-                        {bibliographyFieldsData.publication_date_parts.invalidValue
+                        {bibliographyFieldsData.publication_date_parts
+                          .invalidValue
                           ? `Unsupported publication date: ${bibliographyFieldsData.publication_date_parts.invalidValue}. Enter a valid date.`
                           : "Enter a valid publication date."}
                       </span>
                     )}
                   </fieldset>
                   {BIBLIOGRAPHY_FIELDS.map((field) => (
-                  <div key={field.key}>
-                    <label className="flex flex-col gap-1 text-sm text-primary">
-                      <span className="font-medium flex flex-row gap-2">
-                        {field.label}
-                        {field.tooltip && (
-                          <>
-                            <Info
-                              className="size-4"
-                              data-tooltip-id="bibliography-tip"
-                              data-tooltip-content={field.tooltip}
-                            />
-                            <Tooltip
-                              id="bibliography-tip"
-                              className="text-white! bg-primary! rounded-lg! italic!"
-                            />
-                          </>
-                        )}
-                      </span>
-                      <input
-                        type={field.type}
-                        defaultValue={bibliographyFieldDisplayValue(
-                          field,
-                          bibliographyFieldsData,
-                        )}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setBibliographyFieldsData((prev) =>
-                            withBibliographyFieldValue(prev, field, value),
-                          );
-                          setBibliographyFieldErrors((prev) => ({
-                            ...prev,
-                            [field.key]: !isValidField(value, field.regex),
-                          }));
-                          if (field.key === "title" && value.trim()) {
-                            setMissingFields((prev) =>
-                              prev.filter(
-                                (missing) =>
-                                  missing.path !== "bibliography.title",
-                              ),
-                            );
-                          }
-                        }}
-                        aria-invalid={
-                          bibliographyFieldErrors[field.key] || undefined
-                        }
-                        className={`rounded border px-2 py-1 text-black ${
-                          bibliographyFieldErrors[field.key]
-                            ? "border-red-500"
-                            : "border-border"
-                        }`}
-                        placeholder={field.placeholder}
-                      />
-                      {bibliographyFieldErrors[field.key] && (
-                        <span className="text-xs text-red-500">
-                          {field.key === "title" &&
-                          missingFields.some(
-                            (missing) => missing.path === "bibliography.title",
-                          )
-                            ? "Title is required"
-                            : `Invalid format for ${field.label.toLowerCase()}`}
+                    <div key={field.key}>
+                      <label className="flex flex-col gap-1 text-sm text-primary">
+                        <span className="font-medium flex flex-row gap-2">
+                          {field.label}
                         </span>
-                      )}
-                    </label>
-                  </div>
+                        <input
+                          type={field.type}
+                          defaultValue={bibliographyFieldDisplayValue(
+                            field,
+                            bibliographyFieldsData,
+                          )}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setBibliographyFieldsData((prev) =>
+                              withBibliographyFieldValue(prev, field, value),
+                            );
+                            setBibliographyFieldErrors((prev) => ({
+                              ...prev,
+                              [field.key]: !isValidField(value, field.regex),
+                            }));
+                            if (field.key === "title" && value.trim()) {
+                              setMissingFields((prev) =>
+                                prev.filter(
+                                  (missing) =>
+                                    missing.path !== "bibliography.title",
+                                ),
+                              );
+                            }
+                          }}
+                          aria-invalid={
+                            bibliographyFieldErrors[field.key] || undefined
+                          }
+                          className={`rounded border px-2 py-1 text-black ${
+                            bibliographyFieldErrors[field.key]
+                              ? "border-red-500"
+                              : "border-border"
+                          }`}
+                          placeholder={field.placeholder}
+                        />
+                        {bibliographyFieldErrors[field.key] && (
+                          <span className="text-xs text-red-500">
+                            {field.key === "title" &&
+                            missingFields.some(
+                              (missing) =>
+                                missing.path === "bibliography.title",
+                            )
+                              ? "Title is required"
+                              : `Invalid format for ${field.label.toLowerCase()}`}
+                          </span>
+                        )}
+                      </label>
+                    </div>
                   ))}
                 </>
               )}
@@ -1021,11 +1055,16 @@ export default function UpdateDocumentPage({}) {
           }
         >
           {isSaving && <Loader2 className="size-4 animate-spin" />}
-          {isSaving ? "Saving..." : isDataDirty ? "Save document" : 
+          {isSaving ? (
+            "Saving..."
+          ) : isDataDirty ? (
+            "Save document"
+          ) : (
             <div className="flex flex-row gap-1 items-center">
-            <Check className="size-5" />
-            <p>Saved</p>
-            </div>}
+              <Check className="size-5" />
+              <p>Saved</p>
+            </div>
+          )}
         </button>
       </div>
       <ToastContainer />
