@@ -43,7 +43,7 @@ pub struct UpdateDocumentSummary {
     pub id: Option<i64>,
     pub pdf_hash: Option<String>,
     pub title: Option<String>,
-    pub published_at: Option<String>,
+    pub publication_date: Option<String>,
     #[serde(rename = "requiresFixing")]
     pub requires_fixing: bool,
 }
@@ -136,14 +136,18 @@ impl PostgresReviewStore {
                 SELECT NULL::bigint AS id, pdf_hash,
                     COALESCE(published_artifact #>> '{manual_data,bibliography,title}',
                              published_artifact #>> '{grobid_extraction_data,bibliography,title}') AS title,
-                    published_at, false AS requires_fixing
+                    COALESCE(published_artifact #>> '{manual_data,bibliography,publication_date}',
+                             published_artifact #>> '{grobid_extraction_data,bibliography,publication_date}') AS publication_date,
+                    false AS requires_fixing
                 FROM document_artifacts
                 WHERE published_artifact IS NOT NULL
                 UNION ALL
                 SELECT review.id, review.pdf_hash,
                     COALESCE(artifact.value #>> '{manual_data,bibliography,title}',
                              artifact.value #>> '{grobid_extraction_data,bibliography,title}') AS title,
-                    document.published_at, true AS requires_fixing
+                    COALESCE(artifact.value #>> '{manual_data,bibliography,publication_date}',
+                             artifact.value #>> '{grobid_extraction_data,bibliography,publication_date}') AS publication_date,
+                    true AS requires_fixing
                 FROM review_cases AS review
                 LEFT JOIN document_artifacts AS document ON document.pdf_hash = review.pdf_hash
                 CROSS JOIN LATERAL (SELECT COALESCE(document.draft_artifact, document.published_artifact) AS value) AS artifact
@@ -157,8 +161,8 @@ impl PostgresReviewStore {
                 SELECT *, row_number() OVER (ORDER BY
                     CASE WHEN $3 = 'title' AND $4 THEN NULLIF(title, '') END ASC NULLS LAST,
                     CASE WHEN $3 = 'title' AND NOT $4 THEN NULLIF(title, '') END DESC NULLS LAST,
-                    CASE WHEN $3 = 'published_at' AND $4 THEN published_at END ASC NULLS LAST,
-                    CASE WHEN $3 = 'published_at' AND NOT $4 THEN published_at END DESC NULLS LAST,
+                    CASE WHEN $3 = 'publication_date' AND $4 THEN publication_date END ASC NULLS LAST,
+                    CASE WHEN $3 = 'publication_date' AND NOT $4 THEN publication_date END DESC NULLS LAST,
                     requires_fixing DESC, pdf_hash ASC NULLS LAST, id ASC NULLS LAST
                 ) AS position FROM filtered
             ), paged AS (
@@ -166,7 +170,7 @@ impl PostgresReviewStore {
                 LIMIT $5 OFFSET $6
             )
             SELECT paged.id, paged.pdf_hash, paged.title,
-                   paged.published_at::text AS published_at,
+                   paged.publication_date,
                    paged.requires_fixing, total.count
             FROM (SELECT count(*) AS count FROM filtered) AS total
             LEFT JOIN paged ON true
@@ -191,7 +195,7 @@ impl PostgresReviewStore {
                     id: row.try_get("id")?,
                     pdf_hash: row.try_get("pdf_hash")?,
                     title: row.try_get("title")?,
-                    published_at: row.try_get("published_at")?,
+                    publication_date: row.try_get("publication_date")?,
                     requires_fixing,
                 });
             }
@@ -804,7 +808,7 @@ mod tests {
                 id: Some(7),
                 pdf_hash: Some("hash".into()),
                 title: Some("Title".into()),
-                published_at: None,
+                publication_date: Some("2024-05-06".into()),
                 requires_fixing: true,
             }],
             total: 1,
@@ -813,6 +817,8 @@ mod tests {
         };
         let json = serde_json::to_value(page).unwrap();
         assert_eq!(json["documents"][0]["pdf_hash"], "hash");
+        assert_eq!(json["documents"][0]["publication_date"], "2024-05-06");
+        assert!(json["documents"][0].get("published_at").is_none());
         assert_eq!(json["documents"][0]["requiresFixing"], true);
         assert_eq!(json["total"], 1);
     }

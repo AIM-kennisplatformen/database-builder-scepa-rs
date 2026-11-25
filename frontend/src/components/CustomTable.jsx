@@ -46,8 +46,8 @@ export default function CustomTable({
                 {document.title ? document.title : "[Missing title]"}
               </td>
               <td className="px-3 py-2 ">
-                {document.published_at
-                  ? document.published_at?.split(/[ T]/)[0]
+                {document.publication_date
+                  ? document.publication_date.split(/[ T]/)[0]
                   : "[Missing date]"}
               </td>
               <td className="px-3 py-2 ">

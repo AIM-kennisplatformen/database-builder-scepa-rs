@@ -49,16 +49,16 @@ export default function UpdateDocumentList({}) {
       },
     },
     {
-      title: "Published",
+      title: "Publication date",
       // Show the neutral icon while another column is the active sort.
-      isFilterable: sortKey !== "published_at",
+      isFilterable: sortKey !== "publication_date",
       icon: chronologicalSort ? (
         <CalendarArrowUp className="size-4" />
       ) : (
         <CalendarArrowDown className="size-4" />
       ),
       onClick: () => {
-        setSortKey("published_at");
+        setSortKey("publication_date");
         setChronologicalSort(!chronologicalSort);
         setCurrentPage(1);
       },

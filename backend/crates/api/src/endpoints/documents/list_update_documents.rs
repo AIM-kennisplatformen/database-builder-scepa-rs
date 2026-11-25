@@ -49,7 +49,7 @@ pub(crate) async fn list_update_documents(
     if !matches!(
         query.status.as_str(),
         "all" | "published" | "requiresFixing"
-    ) || !matches!(query.sort_by.as_str(), "title" | "published_at")
+    ) || !matches!(query.sort_by.as_str(), "title" | "publication_date")
         || query.page < 1
         || !(1..=100).contains(&query.page_size)
         || (query.page - 1).checked_mul(query.page_size).is_none()
